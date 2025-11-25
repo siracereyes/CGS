@@ -13,13 +13,13 @@
         font-family: 'Inter', sans-serif;
       }
     </style>
-  <script type="importmap">
+<script type="importmap">
 {
   "imports": {
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
     "react": "https://aistudiocdn.com/react@^19.2.0",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
     "@supabase/supabase-js": "https://aistudiocdn.com/@supabase/supabase-js@^2.84.0"
   }
 }
@@ -27,7 +27,7 @@
 </head>
   <body>
     <div id="root"></div>
-    <!-- CRITICAL: This script tag links your HTML to your React Code -->
-    <script type="module" src="/src/index.tsx"></script>
+    <!-- CRITICAL: Links to index.tsx. Updated to check root directory first -->
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>
