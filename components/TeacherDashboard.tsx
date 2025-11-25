@@ -649,7 +649,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   const saveAttendance = async () => {
     setSavingAttendance(true);
     try {
-      const upserts = Object.entries(attendanceRecords).map(([sid, d]) => ({ student_id: sid, month_key: selectedMonth, attendance_data: d.days, remarks: d.remarks }));
+      const upserts = Object.entries(attendanceRecords).map(([sid, d]) => {
+         const record = d as AttendanceState;
+         return { 
+            student_id: sid, 
+            month_key: selectedMonth, 
+            attendance_data: record.days, 
+            remarks: record.remarks 
+         };
+      });
       if(upserts.length) await supabase.from('attendance_records').upsert(upserts, { onConflict: 'student_id, month_key' });
       alert("Saved!");
     } catch(e:any) { alert(e.message); } finally { setSavingAttendance(false); }
@@ -1596,181 +1604,156 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                 <th className="border-r border-slate-300 bg-green-100 w-12 text-center">Total</th>
                                 <th className="border-r border-slate-300 bg-green-100 w-12 text-center">PS</th>
                                 <th className="border-r border-slate-300 bg-green-100 w-12 text-center">WS</th>
-                                <th className="w-12 bg-slate-200 text-center">Init</th>
-                                <th className="w-12 bg-green-200 text-center font-bold">Grade</th>
+                                {/* Finals */}
+                                <th className="border-r border-slate-300 bg-slate-200 w-16 text-center">Initial Grade</th>
+                                <th className="bg-slate-300 w-16 text-center font-bold">Quarterly Grade</th>
                              </tr>
-                             {/* HPS ROW */}
                              <tr className="bg-slate-50 border-b border-slate-300">
-                                <td className="p-2 border-r border-slate-300 font-bold text-right sticky left-0 bg-slate-50 z-10">Highest Possible Score</td>
-                                {/* WW HPS */}
-                                {[...Array(10)].map((_, i) => (
-                                   <td key={`hps-ww-${i}`} className="border-r border-slate-300 p-0 relative">
-                                      <input type="number" className="w-full h-full text-center outline-none bg-teal-50/50 font-semibold text-teal-700"
-                                         value={crMeta.hps_ww[String(i+1)] || ''}
-                                         onChange={e => handleHpsChange('hps_ww', String(i+1), e.target.value)}
-                                      />
-                                   </td>
-                                ))}
-                                <td className="border-r border-slate-300 text-center bg-teal-100 font-bold">{Object.values(crMeta.hps_ww).reduce((a: number,b: number)=>a+(b||0),0)}</td>
-                                <td className="border-r border-slate-300 bg-teal-100 text-center text-xs text-slate-500">100%</td>
-                                <td className="border-r border-slate-300 bg-teal-100 text-center font-bold">{crMeta.weight_ww}%</td>
-                                {/* PT HPS */}
-                                {[...Array(10)].map((_, i) => (
-                                   <td key={`hps-pt-${i}`} className="border-r border-slate-300 p-0 relative">
-                                      <input type="number" className="w-full h-full text-center outline-none bg-yellow-50/50 font-semibold text-yellow-700"
-                                         value={crMeta.hps_pt[String(i+1)] || ''}
-                                         onChange={e => handleHpsChange('hps_pt', String(i+1), e.target.value)}
-                                      />
-                                   </td>
-                                ))}
-                                <td className="border-r border-slate-300 text-center bg-yellow-100 font-bold">{Object.values(crMeta.hps_pt).reduce((a: number,b: number)=>a+(b||0),0)}</td>
-                                <td className="border-r border-slate-300 bg-yellow-100 text-center text-xs text-slate-500">100%</td>
-                                <td className="border-r border-slate-300 bg-yellow-100 text-center font-bold">{crMeta.weight_pt}%</td>
-                                {/* QA HPS */}
-                                <td className="border-r border-slate-300 p-0 relative">
-                                   <input type="number" className="w-full h-full text-center outline-none bg-green-50/50 font-semibold text-green-700"
-                                      value={crMeta.hps_qa['1'] || ''}
-                                      onChange={e => handleHpsChange('hps_qa', '1', e.target.value)}
-                                   />
-                                </td>
-                                <td className="border-r border-slate-300 text-center bg-green-100 font-bold">{Object.values(crMeta.hps_qa).reduce((a: number,b: number)=>a+(b||0),0)}</td>
-                                <td className="border-r border-slate-300 bg-green-100 text-center text-xs text-slate-500">100%</td>
-                                <td className="border-r border-slate-300 bg-green-100 text-center font-bold">{crMeta.weight_qa}%</td>
-                                <td className="bg-slate-200"></td>
-                                <td className="bg-green-200"></td>
+                                <td className="p-2 border-r border-slate-300 font-bold sticky left-0 bg-slate-50">Highest Possible Score</td>
+                                {/* HPS Inputs */}
+                                {[...Array(10)].map((_,i) => <td key={`hps-ww-${i}`} className="p-0 border-r border-slate-300"><input className="w-full text-center bg-teal-50/50 outline-none" value={crMeta.hps_ww?.[i+1] || ''} onChange={e => handleHpsChange('hps_ww', String(i+1), e.target.value)} /></td>)}
+                                <td className="text-center font-bold bg-teal-50">{(Object.values(crMeta.hps_ww||{}) as number[]).reduce((a,b)=>a+b,0)}</td>
+                                <td className="bg-teal-50">100</td><td className="bg-teal-50">20%</td>
+                                {[...Array(10)].map((_,i) => <td key={`hps-pt-${i}`} className="p-0 border-r border-slate-300"><input className="w-full text-center bg-yellow-50/50 outline-none" value={crMeta.hps_pt?.[i+1] || ''} onChange={e => handleHpsChange('hps_pt', String(i+1), e.target.value)} /></td>)}
+                                <td className="text-center font-bold bg-yellow-50">{(Object.values(crMeta.hps_pt||{}) as number[]).reduce((a,b)=>a+b,0)}</td>
+                                <td className="bg-yellow-50">100</td><td className="bg-yellow-50">60%</td>
+                                <td className="p-0 border-r border-slate-300"><input className="w-full text-center bg-green-50/50 outline-none" value={crMeta.hps_qa?.[1] || ''} onChange={e => handleHpsChange('hps_qa', '1', e.target.value)} /></td>
+                                <td className="text-center font-bold bg-green-50">{(Object.values(crMeta.hps_qa||{}) as number[]).reduce((a,b)=>a+b,0)}</td>
+                                <td className="bg-green-50">100</td><td className="bg-green-50">20%</td>
+                                <td className="bg-slate-100">100</td><td className="bg-slate-200">100</td>
                              </tr>
                           </thead>
                           <tbody>
-                             <tr className="bg-slate-50 border-b"><td colSpan={40} className="p-2 font-bold sticky left-0 bg-slate-50 z-10">MALE</td></tr>
-                             {students.filter(s=>s.sex==='M').map((s, idx) => {
-                                const grades = calculateGrade(crScores[s.id!], crMeta);
-                                return (
-                                <tr key={s.id} className="border-b border-slate-200 hover:bg-slate-50" data-student-id={s.id}>
-                                   <td className="p-1 border-r border-slate-200 px-2 truncate sticky left-0 bg-white hover:bg-slate-50 z-10 font-medium">{idx+1}. {s.last_name}, {s.first_name}</td>
-                                   {/* WW Scores */}
-                                   {[...Array(10)].map((_, i) => (
-                                      <td key={`ww-${i}`} className="border-r border-slate-200 p-0 relative h-8 w-10">
-                                         <input type="number" className="w-full h-full text-center outline-none focus:bg-teal-100 bg-transparent [-moz-appearance:_textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none" 
-                                            value={crScores[s.id!]?.scores_ww[String(i+1)]||''} 
-                                            onChange={e=>handleCrScoreChange(s.id!,'scores_ww',String(i+1),e.target.value)}
-                                            onKeyDown={e => handleKeyDown(e, s.id!, 'scores_ww', String(i+1))}
-                                            onPaste={e => handlePaste(e, s.id!, 'scores_ww', i+1)}
-                                            data-col={`scores_ww-${i+1}`}
-                                         />
-                                      </td>
-                                   ))}
-                                   <td className="border-r border-slate-200 text-center bg-teal-50 font-bold text-xs">{grades.ww.total}</td>
-                                   <td className="border-r border-slate-200 text-center bg-teal-50 text-xs text-slate-500">{grades.ww.ps.toFixed(0)}</td>
-                                   <td className="border-r border-slate-200 text-center bg-teal-50 font-bold text-teal-800 text-xs">{grades.ww.ws.toFixed(2)}</td>
-
-                                   {/* PT Scores */}
-                                   {[...Array(10)].map((_, i) => (
-                                      <td key={`pt-${i}`} className="border-r border-slate-200 p-0 relative h-8 w-10">
-                                         <input type="number" className="w-full h-full text-center outline-none focus:bg-yellow-100 bg-transparent [-moz-appearance:_textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none" 
-                                            value={crScores[s.id!]?.scores_pt[String(i+1)]||''} 
-                                            onChange={e=>handleCrScoreChange(s.id!,'scores_pt',String(i+1),e.target.value)}
-                                            onKeyDown={e => handleKeyDown(e, s.id!, 'scores_pt', String(i+1))}
-                                            onPaste={e => handlePaste(e, s.id!, 'scores_pt', i+1)}
-                                            data-col={`scores_pt-${i+1}`}
-                                         />
-                                      </td>
-                                   ))}
-                                   <td className="border-r border-slate-200 text-center bg-yellow-50 font-bold text-xs">{grades.pt.total}</td>
-                                   <td className="border-r border-slate-200 text-center bg-yellow-50 text-xs text-slate-500">{grades.pt.ps.toFixed(0)}</td>
-                                   <td className="border-r border-slate-200 text-center bg-yellow-50 font-bold text-yellow-800 text-xs">{grades.pt.ws.toFixed(2)}</td>
-
-                                   {/* QA Scores */}
-                                   <td className="border-r border-slate-200 p-0 relative h-8 w-12">
-                                      <input type="number" className="w-full h-full text-center outline-none focus:bg-green-100 bg-transparent [-moz-appearance:_textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none" 
-                                         value={crScores[s.id!]?.scores_qa['1']||''} 
-                                         onChange={e=>handleCrScoreChange(s.id!,'scores_qa','1',e.target.value)} 
-                                         onKeyDown={e => handleKeyDown(e, s.id!, 'scores_qa', '1')}
-                                         onPaste={e => handlePaste(e, s.id!, 'scores_qa', 1)}
-                                         data-col={`scores_qa-1`}
-                                      />
-                                   </td>
-                                   <td className="border-r border-slate-200 text-center bg-green-50 font-bold text-xs">{grades.qa.total}</td>
-                                   <td className="border-r border-slate-200 text-center bg-green-50 text-xs text-slate-500">{grades.qa.ps.toFixed(0)}</td>
-                                   <td className="border-r border-slate-200 text-center bg-green-50 font-bold text-green-800 text-xs">{grades.qa.ws.toFixed(2)}</td>
-                                   
-                                   {/* FINAL GRADES */}
-                                   <td className="border-r border-slate-200 text-center bg-slate-100 text-xs">{grades.initialGrade.toFixed(2)}</td>
-                                   <td className="text-center font-bold bg-green-100 text-green-900 border-r border-slate-300">{grades.quarterlyGrade}</td>
-                                </tr>
-                             )})}
+                             {['M','F'].map(sex => (
+                                <React.Fragment key={sex}>
+                                   <tr className="bg-slate-200 font-bold"><td colSpan={40} className="p-1 pl-4 sticky left-0 bg-slate-200">{sex === 'M' ? 'MALE' : 'FEMALE'}</td></tr>
+                                   {students.filter(s => s.sex === sex).map((s, idx) => {
+                                      const grades = calculateGrade(crScores[s.id!], crMeta);
+                                      return (
+                                        <tr key={s.id} className="hover:bg-blue-50 border-b border-slate-200 group" data-student-id={s.id}>
+                                           <td className="p-2 border-r border-slate-300 font-medium whitespace-nowrap sticky left-0 bg-white group-hover:bg-blue-50 truncate w-48 z-10">{idx+1}. {s.last_name}, {s.first_name}</td>
+                                           {/* WW Scores */}
+                                           {[...Array(10)].map((_,i) => <td key={`ww-${i}`} className="p-0 border-r border-slate-300"><input className="w-full text-center outline-none bg-transparent focus:bg-white focus:ring-1 focus:ring-blue-500 h-full" 
+                                              data-col={`scores_ww-${i+1}`} value={crScores[s.id!]?.scores_ww?.[i+1] || ''} 
+                                              onChange={e => handleCrScoreChange(s.id!, 'scores_ww', String(i+1), e.target.value)}
+                                              onKeyDown={e => handleKeyDown(e, s.id!, 'scores_ww', String(i+1))}
+                                              onPaste={e => handlePaste(e, s.id!, 'scores_ww', i+1)}
+                                           /></td>)}
+                                           <td className="text-center bg-teal-50 border-r border-slate-300">{grades.ww.total}</td>
+                                           <td className="text-center bg-teal-50 border-r border-slate-300">{grades.ww.ps.toFixed(2)}</td>
+                                           <td className="text-center bg-teal-50 border-r border-slate-300 font-bold">{grades.ww.ws.toFixed(2)}</td>
+                                           {/* PT Scores */}
+                                           {[...Array(10)].map((_,i) => <td key={`pt-${i}`} className="p-0 border-r border-slate-300"><input className="w-full text-center outline-none bg-transparent focus:bg-white focus:ring-1 focus:ring-blue-500 h-full" 
+                                              data-col={`scores_pt-${i+1}`} value={crScores[s.id!]?.scores_pt?.[i+1] || ''} 
+                                              onChange={e => handleCrScoreChange(s.id!, 'scores_pt', String(i+1), e.target.value)}
+                                              onKeyDown={e => handleKeyDown(e, s.id!, 'scores_pt', String(i+1))}
+                                              onPaste={e => handlePaste(e, s.id!, 'scores_pt', i+1)}
+                                           /></td>)}
+                                           <td className="text-center bg-yellow-50 border-r border-slate-300">{grades.pt.total}</td>
+                                           <td className="text-center bg-yellow-50 border-r border-slate-300">{grades.pt.ps.toFixed(2)}</td>
+                                           <td className="text-center bg-yellow-50 border-r border-slate-300 font-bold">{grades.pt.ws.toFixed(2)}</td>
+                                           {/* QA Scores */}
+                                           <td className="p-0 border-r border-slate-300"><input className="w-full text-center outline-none bg-transparent focus:bg-white focus:ring-1 focus:ring-blue-500 h-full" 
+                                              data-col="scores_qa-1" value={crScores[s.id!]?.scores_qa?.[1] || ''} 
+                                              onChange={e => handleCrScoreChange(s.id!, 'scores_qa', '1', e.target.value)}
+                                              onKeyDown={e => handleKeyDown(e, s.id!, 'scores_qa', '1')}
+                                              onPaste={e => handlePaste(e, s.id!, 'scores_qa', 1)}
+                                           /></td>
+                                           <td className="text-center bg-green-50 border-r border-slate-300">{grades.qa.total}</td>
+                                           <td className="text-center bg-green-50 border-r border-slate-300">{grades.qa.ps.toFixed(2)}</td>
+                                           <td className="text-center bg-green-50 border-r border-slate-300 font-bold">{grades.qa.ws.toFixed(2)}</td>
+                                           
+                                           {/* Finals */}
+                                           <td className="text-center font-bold bg-slate-50 border-r border-slate-300">{grades.initialGrade.toFixed(2)}</td>
+                                           <td className={`text-center font-extrabold text-white ${grades.quarterlyGrade < 75 ? 'bg-red-500' : 'bg-green-700'}`}>{grades.quarterlyGrade}</td>
+                                        </tr>
+                                      );
+                                   })}
+                                </React.Fragment>
+                             ))}
                           </tbody>
                        </table>
                     </div>
                   </div>
-                ) : <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">Load Class Record to view.</div>}
+                ) : (
+                   <div className="text-center py-20 text-slate-400 bg-white border border-dashed border-slate-300 rounded-xl">
+                      <p>Select a Grade, Section, and Subject above to start grading.</p>
+                      {crError && <p className="text-red-500 mt-2 text-sm">Error: {crError}</p>}
+                   </div>
+                )}
               </div>
             )}
+            
+            {/* Student Modal */}
+            {showAddStudentModal && (
+               <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                  <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                     <div className="p-6 border-b border-slate-100 flex justify-between items-center sticky top-0 bg-white z-10">
+                        <h2 className="text-xl font-bold text-green-900">{isEditingStudent ? 'Edit Student' : 'Add New Student'}</h2>
+                        <button onClick={() => setShowAddStudentModal(false)}><X className="h-5 w-5 text-slate-400 hover:text-red-500"/></button>
+                     </div>
+                     <form onSubmit={handleSaveStudent} className="p-6 space-y-6">
+                        <div className="bg-green-50 p-3 rounded-lg border border-green-100 mb-4 text-sm text-green-800">
+                           <span className="font-bold">Note:</span> Adding to class: <span className="font-bold underline">{adviserSection?.grade_level} - {adviserSection?.section_name}</span>
+                        </div>
+                        
+                        <div className="space-y-4">
+                           <h3 className="font-bold text-slate-700 border-b pb-2">Basic Information</h3>
+                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              <Input label="LRN" name="lrn" value={newStudent.lrn||''} onChange={handleInputChange} required placeholder="12-digit LRN" />
+                              <Input label="Last Name" name="last_name" value={newStudent.last_name||''} onChange={handleInputChange} required />
+                              <Input label="First Name" name="first_name" value={newStudent.first_name||''} onChange={handleInputChange} required />
+                              <Input label="Middle Name" name="middle_name" value={newStudent.middle_name||''} onChange={handleInputChange} />
+                              <Input label="Extension (Jr, III)" name="extension_name" value={newStudent.extension_name||''} onChange={handleInputChange} />
+                              <Select label="Sex" name="sex" value={newStudent.sex||''} onChange={handleInputChange} options={['M', 'F']} required />
+                              <Input label="Birth Date" type="date" name="birth_date" value={newStudent.birth_date||''} onChange={handleInputChange} required />
+                              <Input label="Age" type="number" name="age" value={newStudent.age||''} onChange={handleInputChange} />
+                              <Input label="Birth Place" name="birth_place" value={newStudent.birth_place||''} onChange={handleInputChange} />
+                              <Input label="Religion" name="religion" value={newStudent.religion||''} onChange={handleInputChange} />
+                           </div>
+                        </div>
+
+                        <div className="space-y-4">
+                           <h3 className="font-bold text-slate-700 border-b pb-2">Address</h3>
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <Input label="House No. / Street" name="address_house_no" value={newStudent.address_house_no||''} onChange={handleInputChange} />
+                              <Input label="Barangay" name="address_barangay" value={newStudent.address_barangay||''} onChange={handleInputChange} />
+                              <Input label="Municipality/City" name="address_municipality" value={newStudent.address_municipality||''} onChange={handleInputChange} />
+                              <Input label="Province" name="address_province" value={newStudent.address_province||''} onChange={handleInputChange} />
+                              <Input label="Zip Code" name="address_zip" value={newStudent.address_zip||''} onChange={handleInputChange} />
+                           </div>
+                        </div>
+
+                        <div className="space-y-4">
+                           <h3 className="font-bold text-slate-700 border-b pb-2">Parents & Guardian</h3>
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <Input label="Father's Name" name="father_name" value={newStudent.father_name||''} onChange={handleInputChange} />
+                              <Input label="Mother's Maiden Name" name="mother_maiden_name" value={newStudent.mother_maiden_name||''} onChange={handleInputChange} />
+                              <Input label="Guardian's Name" name="guardian_name" value={newStudent.guardian_name||''} onChange={handleInputChange} />
+                              <Input label="Relationship" name="guardian_relationship" value={newStudent.guardian_relationship||''} onChange={handleInputChange} />
+                              <Input label="Contact Number" name="guardian_contact" value={newStudent.guardian_contact||''} onChange={handleInputChange} />
+                           </div>
+                        </div>
+
+                        <div className="space-y-4">
+                           <h3 className="font-bold text-slate-700 border-b pb-2">Other</h3>
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <Input label="Learning Modality" name="learning_modality" value={newStudent.learning_modality||''} onChange={handleInputChange} placeholder="F2F, Modular, Online" />
+                              <Input label="Remarks" name="remarks" value={newStudent.remarks||''} onChange={handleInputChange} />
+                           </div>
+                        </div>
+
+                        <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                           <Button type="button" variant="outline" onClick={() => setShowAddStudentModal(false)}>Cancel</Button>
+                           <Button type="submit" isLoading={loading}>{isEditingStudent ? 'Update Student' : 'Add Student'}</Button>
+                        </div>
+                     </form>
+                  </div>
+               </div>
+            )}
+
          </div>
       </main>
-
-      {showAddStudentModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-           <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
-              <div className="bg-green-800 p-4 flex justify-between items-center text-white flex-shrink-0">
-                 <h3 className="font-bold">{isEditingStudent?'Edit':'Add'} Student</h3>
-                 <button onClick={()=>setShowAddStudentModal(false)}><X/></button>
-              </div>
-              
-              <form onSubmit={handleSaveStudent} className="p-6 space-y-4 overflow-y-auto">
-                 
-                 <div className="bg-slate-50 p-3 rounded border border-slate-200">
-                    <h4 className="font-bold text-green-800 mb-2 text-sm">Basic Information</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                       <div className="col-span-2"><Input label="LRN" name="lrn" value={newStudent.lrn||''} onChange={handleInputChange} required /></div>
-                       <Input label="Last Name" name="last_name" value={newStudent.last_name||''} onChange={handleInputChange} required />
-                       <Input label="First Name" name="first_name" value={newStudent.first_name||''} onChange={handleInputChange} required />
-                       <Input label="Middle Name" name="middle_name" value={newStudent.middle_name||''} onChange={handleInputChange} />
-                       <Input label="Ext Name" name="extension_name" value={newStudent.extension_name||''} onChange={handleInputChange} />
-                       <Select label="Sex" name="sex" options={['M','F']} value={newStudent.sex||''} onChange={handleInputChange} />
-                       <Input label="Birth Date" type="date" name="birth_date" value={newStudent.birth_date||''} onChange={handleInputChange} />
-                       <Input label="Age" type="number" name="age" value={newStudent.age||''} onChange={handleInputChange} />
-                       <Input label="Birth Place" name="birth_place" value={newStudent.birth_place||''} onChange={handleInputChange} />
-                       <Input label="Religion" name="religion" value={newStudent.religion||''} onChange={handleInputChange} />
-                    </div>
-                 </div>
-
-                 <div className="bg-slate-50 p-3 rounded border border-slate-200">
-                    <h4 className="font-bold text-green-800 mb-2 text-sm">Address</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                       <Input label="House No./St" name="address_house_no" value={newStudent.address_house_no||''} onChange={handleInputChange} />
-                       <Input label="Barangay" name="address_barangay" value={newStudent.address_barangay||''} onChange={handleInputChange} />
-                       <Input label="Municipality" name="address_municipality" value={newStudent.address_municipality||''} onChange={handleInputChange} />
-                       <Input label="Province" name="address_province" value={newStudent.address_province||''} onChange={handleInputChange} />
-                       <Input label="Zip Code" name="address_zip" value={newStudent.address_zip||''} onChange={handleInputChange} />
-                    </div>
-                 </div>
-
-                 <div className="bg-slate-50 p-3 rounded border border-slate-200">
-                    <h4 className="font-bold text-green-800 mb-2 text-sm">Parents & Guardian</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                       <Input label="Father's Name" name="father_name" value={newStudent.father_name||''} onChange={handleInputChange} />
-                       <Input label="Mother's Maiden Name" name="mother_maiden_name" value={newStudent.mother_maiden_name||''} onChange={handleInputChange} />
-                       <Input label="Guardian's Name" name="guardian_name" value={newStudent.guardian_name||''} onChange={handleInputChange} />
-                       <div className="grid grid-cols-2 gap-2">
-                          <Input label="Relationship" name="guardian_relationship" value={newStudent.guardian_relationship||''} onChange={handleInputChange} />
-                          <Input label="Contact No." name="guardian_contact" value={newStudent.guardian_contact||''} onChange={handleInputChange} />
-                       </div>
-                    </div>
-                 </div>
-
-                 <div className="bg-slate-50 p-3 rounded border border-slate-200">
-                    <h4 className="font-bold text-green-800 mb-2 text-sm">Others</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                       <Input label="Learning Modality" name="learning_modality" value={newStudent.learning_modality||''} onChange={handleInputChange} />
-                       <Input label="Remarks" name="remarks" value={newStudent.remarks||''} onChange={handleInputChange} />
-                    </div>
-                 </div>
-
-                 <div className="col-span-2 flex justify-end gap-2 mt-4 pt-4 border-t flex-shrink-0"><Button type="button" variant="outline" onClick={()=>setShowAddStudentModal(false)}>Cancel</Button><Button type="submit">Save</Button></div>
-              </form>
-           </div>
-        </div>
-      )}
     </div>
   );
 };
