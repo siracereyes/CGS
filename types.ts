@@ -204,6 +204,8 @@ export interface SimpleTeacherProfile {
   main_subject: string;
   main_grade_level?: string;
   additional_grades?: string[];
+  role?: string;
+  username?: string;
 }
 
 // --- Class Record Types ---

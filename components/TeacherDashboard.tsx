@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Button } from './ui/Button';
@@ -115,7 +116,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   const [sf9Error, setSf9Error] = useState<string | null>(null);
 
   // Admin & Head Teacher State
-  const [adminTab, setAdminTab] = useState<'sections' | 'assignments'>('sections');
+  const [adminTab, setAdminTab] = useState<'sections' | 'assignments' | 'users'>('sections');
   const [allSections, setAllSections] = useState<Section[]>([]);
   const [allTeachers, setAllTeachers] = useState<SimpleTeacherProfile[]>([]);
   
@@ -800,6 +801,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
      }
   };
 
+  const handleUpdateRole = async (userId: string, newRole: string) => {
+    if(!confirm(`Are you sure you want to change this user's role to ${newRole}?`)) return;
+    setLoading(true);
+    try {
+       const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
+       if(error) throw error;
+       alert("User role updated successfully.");
+       fetchAdminData();
+    } catch(e: any) {
+       alert("Error updating role: " + e.message);
+    } finally {
+       setLoading(false);
+    }
+  };
+
   // --- CLASS RECORD LOGIC ---
   const handleCrMetaChange = (field: keyof ClassRecordMeta, value: any) => {
     setCrMeta(prev => {
@@ -1426,6 +1442,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                     >
                        Assign Subject Teachers
                     </button>
+                    <button 
+                       className={`pb-2 px-1 text-sm font-medium transition-colors ${adminTab==='users' ? 'border-b-2 border-green-600 text-green-700' : 'text-slate-500 hover:text-green-600'}`}
+                       onClick={() => setAdminTab('users')}
+                    >
+                       Manage Users
+                    </button>
                  </div>
                  
                  {/* Manage Sections Tab */}
@@ -1540,6 +1562,62 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                              Please select a section to manage subject assignments.
                           </div>
                        )}
+                    </div>
+                 )}
+
+                 {/* User Management Tab */}
+                 {adminTab === 'users' && (
+                    <div>
+                       <h2 className="text-lg font-bold text-green-900 mb-4">User Role Management</h2>
+                       <div className="overflow-x-auto bg-white rounded-lg border border-slate-200">
+                          <table className="w-full text-sm text-left">
+                             <thead className="bg-green-50 text-green-900 font-bold">
+                                <tr>
+                                   <th className="p-3 border-b">Name</th>
+                                   <th className="p-3 border-b">Username</th>
+                                   <th className="p-3 border-b">Current Role</th>
+                                   <th className="p-3 border-b">Actions</th>
+                                </tr>
+                             </thead>
+                             <tbody className="divide-y divide-slate-100">
+                                {allTeachers.map(t => (
+                                   <tr key={t.id} className="hover:bg-slate-50">
+                                      <td className="p-3 font-medium">{t.last_name}, {t.first_name}</td>
+                                      <td className="p-3">{t.username || 'N/A'}</td>
+                                      <td className="p-3">
+                                         <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                                            t.role === 'Admin' ? 'bg-purple-100 text-purple-700' :
+                                            t.role === 'Head Teacher' ? 'bg-blue-100 text-blue-700' :
+                                            'bg-slate-100 text-slate-700'
+                                         }`}>
+                                            {t.role || 'Teacher'}
+                                         </span>
+                                      </td>
+                                      <td className="p-3 flex items-center gap-2">
+                                         <select 
+                                            className="border border-slate-300 rounded p-1 text-xs"
+                                            defaultValue={t.role || 'Teacher'}
+                                            id={`role-select-${t.id}`}
+                                         >
+                                            <option value="Teacher">Teacher</option>
+                                            <option value="Head Teacher">Head Teacher</option>
+                                            <option value="Admin">Admin</option>
+                                         </select>
+                                         <Button 
+                                            size="sm" 
+                                            onClick={() => {
+                                               const select = document.getElementById(`role-select-${t.id}`) as HTMLSelectElement;
+                                               handleUpdateRole(t.id, select.value);
+                                            }}
+                                         >
+                                            Update
+                                         </Button>
+                                      </td>
+                                   </tr>
+                                ))}
+                             </tbody>
+                          </table>
+                       </div>
                     </div>
                  )}
                </div>
