@@ -5,7 +5,7 @@ import {
   Users, BookOpen, Save, Download, Search, Menu, 
   FileSpreadsheet, Upload, Plus, X, Calendar, AlertCircle, Copy, RefreshCw, Library, Trash2,
   BarChart, PieChart, GraduationCap, Printer, Briefcase, LayoutGrid, Calculator, Edit2, Check, Clock, Settings, UserCheck, Pencil,
-  ShieldCheck, LayoutDashboard, LogOut, ChevronDown, User, CheckSquare, Square, Key, Mail, Lock
+  ShieldCheck, LayoutDashboard, LogOut, ChevronDown, User, CheckSquare, Square, Key, Mail, Lock, Database
 } from 'lucide-react';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
@@ -18,6 +18,203 @@ import {
 interface TeacherDashboardProps {
   session: any;
 }
+
+// SQL Schema for the user to copy
+const REQUIRED_SCHEMA_SQL = `
+-- Enable UUID extension
+create extension if not exists "uuid-ossp";
+
+-- 1. PROFILES
+create table if not exists public.profiles (
+  id uuid references auth.users on delete cascade primary key,
+  first_name text,
+  last_name text,
+  email text,
+  username text,
+  role text,
+  main_subject text,
+  main_grade_level text,
+  has_multiple_grades boolean default false,
+  additional_grades text[] default '{}',
+  additional_subjects text[] default '{}',
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+alter table public.profiles enable row level security;
+create policy "Public profiles are viewable by everyone" on public.profiles for select using (true);
+create policy "Users can insert their own profile" on public.profiles for insert with check (auth.uid() = id);
+create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
+
+-- 2. SECTIONS
+create table if not exists public.sections (
+  id uuid default uuid_generate_v4() primary key,
+  grade_level text not null,
+  section_name text not null,
+  adviser_id uuid references public.profiles(id),
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+alter table public.sections enable row level security;
+create policy "Sections are viewable by everyone" on public.sections for select using (true);
+create policy "Admins/Head Teachers can insert/update sections" on public.sections for all using (true);
+
+-- 3. STUDENTS
+create table if not exists public.students (
+  id uuid default uuid_generate_v4() primary key,
+  lrn text,
+  last_name text,
+  first_name text,
+  middle_name text,
+  extension_name text,
+  sex text,
+  birth_date date,
+  age integer,
+  birth_place text,
+  religion text,
+  address_house_no text,
+  address_barangay text,
+  address_municipality text,
+  address_province text,
+  address_zip text,
+  father_name text,
+  mother_maiden_name text,
+  guardian_name text,
+  guardian_relationship text,
+  guardian_contact text,
+  learning_modality text,
+  remarks text,
+  grade_level text,
+  section text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+alter table public.students enable row level security;
+create policy "Enable all access for authenticated users" on public.students for all using (auth.role() = 'authenticated');
+
+-- 4. SECTION ASSIGNMENTS
+create table if not exists public.section_assignments (
+  id uuid default uuid_generate_v4() primary key,
+  section_id uuid references public.sections(id) on delete cascade,
+  subject text not null,
+  teacher_id uuid references public.profiles(id),
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+alter table public.section_assignments enable row level security;
+create policy "Enable all access for authenticated users" on public.section_assignments for all using (auth.role() = 'authenticated');
+
+-- 5. ATTENDANCE RECORDS
+create table if not exists public.attendance_records (
+  id uuid default uuid_generate_v4() primary key,
+  student_id uuid references public.students(id) on delete cascade,
+  month_key text not null, 
+  attendance_data jsonb default '{}'::jsonb,
+  remarks text,
+  unique(student_id, month_key)
+);
+alter table public.attendance_records enable row level security;
+create policy "Enable all access" on public.attendance_records for all using (auth.role() = 'authenticated');
+
+-- 6. BOOK ASSIGNMENTS
+create table if not exists public.book_assignments (
+  id uuid default uuid_generate_v4() primary key,
+  student_id uuid references public.students(id) on delete cascade,
+  book_title text,
+  subject text,
+  date_issued date,
+  date_returned date,
+  remarks text
+);
+alter table public.book_assignments enable row level security;
+create policy "Enable all access" on public.book_assignments for all using (auth.role() = 'authenticated');
+
+-- 7. ACADEMIC RECORDS
+create table if not exists public.student_academic_records (
+  student_id uuid references public.students(id) on delete cascade primary key,
+  general_average numeric,
+  action_taken text,
+  incomplete_subjects text
+);
+alter table public.student_academic_records enable row level security;
+create policy "Enable all access" on public.student_academic_records for all using (auth.role() = 'authenticated');
+
+-- 8. SUBJECT GRADES
+create table if not exists public.subject_grades (
+  id uuid default uuid_generate_v4() primary key,
+  student_id uuid references public.students(id) on delete cascade,
+  subject text,
+  quarter_1 numeric,
+  quarter_2 numeric,
+  quarter_3 numeric,
+  quarter_4 numeric,
+  final_grade numeric,
+  remarks text,
+  unique(student_id, subject)
+);
+alter table public.subject_grades enable row level security;
+create policy "Enable all access" on public.subject_grades for all using (auth.role() = 'authenticated');
+
+-- 9. LEARNER VALUES
+create table if not exists public.learner_values (
+  id uuid default uuid_generate_v4() primary key,
+  student_id uuid references public.students(id) on delete cascade,
+  core_value text,
+  behavior_statement text,
+  q1 text,
+  q2 text,
+  q3 text,
+  q4 text,
+  unique(student_id, behavior_statement)
+);
+alter table public.learner_values enable row level security;
+create policy "Enable all access" on public.learner_values for all using (auth.role() = 'authenticated');
+
+-- 10. CLASS RECORD META
+create table if not exists public.class_record_meta (
+  id uuid default uuid_generate_v4() primary key,
+  grade_level text,
+  section text,
+  subject text,
+  quarter integer,
+  hps_ww jsonb default '{}'::jsonb,
+  hps_pt jsonb default '{}'::jsonb,
+  hps_qa jsonb default '{}'::jsonb,
+  weight_ww numeric default 30,
+  weight_pt numeric default 50,
+  weight_qa numeric default 20,
+  unique(grade_level, section, subject, quarter)
+);
+alter table public.class_record_meta enable row level security;
+create policy "Enable all access" on public.class_record_meta for all using (auth.role() = 'authenticated');
+
+-- 11. CLASS RECORD SCORES
+create table if not exists public.class_record_scores (
+  id uuid default uuid_generate_v4() primary key,
+  student_id uuid references public.students(id) on delete cascade,
+  subject text,
+  quarter integer,
+  scores_ww jsonb default '{}'::jsonb,
+  scores_pt jsonb default '{}'::jsonb,
+  scores_qa jsonb default '{}'::jsonb,
+  initial_grade numeric,
+  quarterly_grade numeric,
+  unique(student_id, subject, quarter)
+);
+alter table public.class_record_scores enable row level security;
+create policy "Enable all access" on public.class_record_scores for all using (auth.role() = 'authenticated');
+
+-- 12. RPC for Username Login
+create or replace function get_email_by_username(username_input text)
+returns text
+language plpgsql
+security definer
+as $$
+begin
+  return (
+    select email 
+    from public.profiles 
+    where username = username_input 
+    limit 1
+  );
+end;
+$$;
+`;
 
 // Local type for managing combined attendance state
 type AttendanceState = {
@@ -70,6 +267,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   // Header User Menu State
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
+  const [showSchemaModal, setShowSchemaModal] = useState(false);
   
   // Profile Settings Form
   const [userProfileForm, setUserProfileForm] = useState({
@@ -195,7 +393,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   const syncUserProfile = async () => {
     try {
       // Check if I exist in profiles
-      const { data } = await supabase.from('profiles').select('id, additional_subjects').eq('id', user.id).maybeSingle();
+      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
       
       if (!data) {
          console.log("Profile missing, syncing now...");
@@ -214,8 +412,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
          }]);
       } else {
          // If I exist, ensure local state matches DB (especially for arrays)
+         // This ensures the profile settings form is pre-filled correctly
          setUserProfileForm(prev => ({
             ...prev,
+            firstName: data.first_name,
+            lastName: data.last_name,
+            mainSubject: data.main_subject,
+            mainGradeLevel: data.main_grade_level,
+            hasMultipleGrades: data.has_multiple_grades,
+            additionalGrades: data.additional_grades || [],
             additionalSubjects: data.additional_subjects || []
          }));
       }
@@ -547,7 +752,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   };
 
   const fetchAdminData = async () => {
+    // We allow admin AND head teacher to fetch.
+    // Also, regular teachers might need this if we use it for some lookups, 
+    // but usually only admin/HT views trigger this.
     if (!isAdmin && !isHeadTeacher) return;
+    
     setLoading(true);
     try {
       // 1. Fetch Sections 
@@ -558,7 +767,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
       // 2. Fetch Profiles with extended info
       const { data: profData, error: profError } = await supabase
          .from('profiles')
-         .select('*')
+         .select('id, first_name, last_name, email, username, role, main_subject, main_grade_level, has_multiple_grades, additional_grades, additional_subjects')
          .order('last_name'); // Order by name for easier lookup
       
       if (profError) {
@@ -631,25 +840,60 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
            last_name: userProfileForm.lastName,
            main_grade_level: userProfileForm.mainGradeLevel,
            has_multiple_grades: userProfileForm.hasMultipleGrades,
-           additional_grades: userProfileForm.additionalGrades,
-           additional_subjects: userProfileForm.additionalSubjects
+           additional_grades: userProfileForm.additionalGrades, // Save Array
+           additional_subjects: userProfileForm.additionalSubjects // Save Array
         }).eq('id', user.id);
         
-        if(error) throw error;
+        if(error) {
+           if (error.message.includes('does not exist')) {
+              // Trigger schema helper
+              alert("Error: Database tables are missing. Please click the 'Database Schema' option in your profile menu to fix this.");
+              setShowSchemaModal(true);
+              throw error;
+           }
+           throw error;
+        }
         
+        // Update auth email if changed
         if (userProfileForm.email !== user.email) {
            const { error: authError } = await supabase.auth.updateUser({ email: userProfileForm.email });
-           if(authError) alert("Profile updated, but failed to update Login Email: " + authError.message);
+           if(authError) alert("Profile details saved, but failed to update Login Email: " + authError.message);
            else alert("Profile and Login Email updated! Check your new email for confirmation.");
         } else {
-           alert("Profile Updated Successfully.");
+           alert("Profile Saved Successfully!");
         }
+        
         setShowProfileSettings(false);
+        // Refresh local sync
+        syncUserProfile();
      } catch(e:any) {
-        alert("Error updating profile: " + e.message);
+        if (!e.message.includes('does not exist')) {
+            alert("Error updating profile: " + e.message);
+        }
      } finally {
         setLoading(false);
      }
+  };
+  
+  // Profile Helpers
+  const handleAdditionalGradeToggle = (grade: string) => {
+    setUserProfileForm(prev => {
+       const current = prev.additionalGrades || [];
+       if (current.includes(grade)) {
+          return { ...prev, additionalGrades: current.filter(g => g !== grade) };
+       }
+       return { ...prev, additionalGrades: [...current, grade] };
+    });
+  };
+
+  const handleAdditionalSubjectToggle = (subj: string) => {
+    setUserProfileForm(prev => {
+       const current = prev.additionalSubjects || [];
+       if (current.includes(subj)) {
+          return { ...prev, additionalSubjects: current.filter(s => s !== subj) };
+       }
+       return { ...prev, additionalSubjects: [...current, subj] };
+    });
   };
 
   const handleResetPassword = async (email: string) => {
@@ -1292,6 +1536,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                       className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-green-50 hover:text-green-800 flex items-center gap-2"
                    >
                       <Settings className="h-4 w-4" /> Profile Settings
+                   </button>
+                   <button 
+                      onClick={() => { setShowUserMenu(false); setShowSchemaModal(true); }}
+                      className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-green-50 hover:text-green-800 flex items-center gap-2"
+                   >
+                      <Database className="h-4 w-4" /> Database Schema
                    </button>
                    <div className="border-t border-slate-100 my-1"></div>
                    <button 
@@ -2151,17 +2401,76 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                         <button onClick={() => setShowProfileSettings(false)}><X className="h-5 w-5 text-slate-400 hover:text-red-500"/></button>
                      </div>
                      <form onSubmit={handleUpdateMyProfile} className="flex-1 overflow-y-auto p-6 space-y-6">
-                        {/* Profile form fields... unchanged */}
+                        {/* Personal Info */}
                         <section>
                            <h3 className="font-bold text-slate-700 border-b pb-2 mb-4">Personal Information</h3>
-                           {/* ... */}
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <Input label="First Name" value={userProfileForm.firstName} onChange={e=>setUserProfileForm({...userProfileForm, firstName: e.target.value})} />
+                              <Input label="Last Name" value={userProfileForm.lastName} onChange={e=>setUserProfileForm({...userProfileForm, lastName: e.target.value})} />
+                              <div className="md:col-span-2">
+                                 <Input label="Email Address" type="email" value={userProfileForm.email} onChange={e=>setUserProfileForm({...userProfileForm, email: e.target.value})} />
+                                 <p className="text-xs text-slate-500 mt-1">Changing your email will require re-confirmation.</p>
+                              </div>
+                           </div>
                         </section>
+
+                        {/* Main Assignment */}
                         <section>
                            <h3 className="font-bold text-slate-700 border-b pb-2 mb-4">Main Assignment</h3>
-                           {/* ... */}
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                 <label className="block text-sm font-medium text-slate-700 mb-1">Main Subject (Read Only)</label>
+                                 <input disabled className="w-full bg-slate-100 border border-slate-300 rounded-lg p-2 text-slate-500 cursor-not-allowed" value={userProfileForm.mainSubject} />
+                              </div>
+                              <Select label="Main Grade Level" options={Object.values(GradeLevel)} value={userProfileForm.mainGradeLevel} onChange={e=>setUserProfileForm({...userProfileForm, mainGradeLevel: e.target.value})} />
+                           </div>
                         </section>
+                        
+                        {/* Additional Assignments */}
                         <section className="bg-slate-50 rounded-lg p-6 border border-slate-200">
-                           {/* ... Multi-grade logic ... */}
+                           <div className="flex items-center mb-4">
+                              <label className="flex items-center cursor-pointer select-none">
+                                 <div className="relative">
+                                    <input type="checkbox" className="sr-only" checked={userProfileForm.hasMultipleGrades} onChange={e=>setUserProfileForm({...userProfileForm, hasMultipleGrades: e.target.checked})} />
+                                    <div className={`w-6 h-6 border-2 rounded transition-colors flex items-center justify-center ${userProfileForm.hasMultipleGrades ? 'bg-green-800 border-green-800' : 'bg-white border-slate-300'}`}>
+                                       {userProfileForm.hasMultipleGrades && <CheckSquare className="h-4 w-4 text-white" />}
+                                    </div>
+                                 </div>
+                                 <span className="ml-3 text-sm font-medium text-slate-900">I teach multiple subjects/grades</span>
+                              </label>
+                           </div>
+                           
+                           {userProfileForm.hasMultipleGrades && (
+                              <div className="space-y-6 animate-fadeIn">
+                                 <div>
+                                    <p className="text-xs font-bold text-slate-500 uppercase mb-2">Additional Subjects</p>
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                       {Object.values(Subject).filter(s => s !== userProfileForm.mainSubject).map(subj => (
+                                          <div key={subj} onClick={() => handleAdditionalSubjectToggle(subj)} className={`cursor-pointer p-2 rounded border text-xs flex items-center ${userProfileForm.additionalSubjects.includes(subj) ? 'bg-green-100 border-green-400 text-green-900' : 'bg-white border-slate-200 text-slate-600'}`}>
+                                             <div className={`w-4 h-4 mr-2 border rounded flex items-center justify-center ${userProfileForm.additionalSubjects.includes(subj) ? 'bg-green-600 border-green-600' : 'bg-white border-slate-300'}`}>
+                                                {userProfileForm.additionalSubjects.includes(subj) && <Check className="h-3 w-3 text-white" />}
+                                             </div>
+                                             {subj}
+                                          </div>
+                                       ))}
+                                    </div>
+                                 </div>
+                                 
+                                 <div>
+                                    <p className="text-xs font-bold text-slate-500 uppercase mb-2">Additional Grade Levels</p>
+                                    <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+                                       {Object.values(GradeLevel).map(grade => (
+                                          <div key={grade} onClick={() => handleAdditionalGradeToggle(grade)} className={`cursor-pointer p-2 rounded border text-xs flex items-center ${userProfileForm.additionalGrades.includes(grade) ? 'bg-green-100 border-green-400 text-green-900' : 'bg-white border-slate-200 text-slate-600'}`}>
+                                             <div className={`w-4 h-4 mr-2 border rounded flex items-center justify-center ${userProfileForm.additionalGrades.includes(grade) ? 'bg-green-600 border-green-600' : 'bg-white border-slate-300'}`}>
+                                                {userProfileForm.additionalGrades.includes(grade) && <Check className="h-3 w-3 text-white" />}
+                                             </div>
+                                             {grade}
+                                          </div>
+                                       ))}
+                                    </div>
+                                 </div>
+                              </div>
+                           )}
                         </section>
                         
                         <div className="pt-2 flex justify-end gap-3 border-t border-slate-100 mt-4">
@@ -2169,6 +2478,37 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                            <Button type="submit" isLoading={loading}>Save Changes</Button>
                         </div>
                      </form>
+                  </div>
+               </div>
+            )}
+            
+            {/* SCHEMA HELP MODAL */}
+            {showSchemaModal && (
+               <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                  <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+                     <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-blue-50">
+                        <div className="flex items-center gap-3">
+                           <Database className="h-6 w-6 text-blue-600" />
+                           <div>
+                              <h2 className="text-xl font-bold text-slate-900">Database Tables Missing</h2>
+                              <p className="text-sm text-slate-600">Please run the SQL below in your Supabase Dashboard.</p>
+                           </div>
+                        </div>
+                        <button onClick={() => setShowSchemaModal(false)}><X className="h-5 w-5 text-slate-400 hover:text-red-500"/></button>
+                     </div>
+                     <div className="p-4 bg-slate-100 overflow-hidden flex-1 relative">
+                        <pre className="text-xs font-mono bg-slate-900 text-green-400 p-4 rounded-lg overflow-auto h-full whitespace-pre-wrap">
+                           {REQUIRED_SCHEMA_SQL}
+                        </pre>
+                        <div className="absolute top-8 right-8">
+                           <Button onClick={() => { navigator.clipboard.writeText(REQUIRED_SCHEMA_SQL); alert("SQL Copied to Clipboard!"); }}>
+                              <Copy className="h-4 w-4 mr-2"/> Copy SQL
+                           </Button>
+                        </div>
+                     </div>
+                     <div className="p-4 border-t border-slate-100 flex justify-end">
+                        <Button onClick={() => setShowSchemaModal(false)}>Close</Button>
+                     </div>
                   </div>
                </div>
             )}
