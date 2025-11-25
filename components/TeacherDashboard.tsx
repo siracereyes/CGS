@@ -6,7 +6,7 @@ import {
   Users, BookOpen, Save, Download, Search, Menu, 
   FileSpreadsheet, Upload, Plus, X, Calendar, AlertCircle, Copy, RefreshCw, Library, Trash2,
   BarChart, PieChart, GraduationCap, Printer, Briefcase, LayoutGrid, Calculator, Edit2, Check, Clock, Settings, UserCheck, Pencil,
-  ShieldCheck, LayoutDashboard, LogOut, ChevronDown, User, CheckSquare, Square
+  ShieldCheck, LayoutDashboard, LogOut, ChevronDown, User, CheckSquare, Square, Key, Mail, Lock
 } from 'lucide-react';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
@@ -74,9 +74,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   
   // Profile Settings Form
   const [userProfileForm, setUserProfileForm] = useState({
+    firstName: user_metadata.firstName || '',
+    lastName: user_metadata.lastName || '',
+    email: user.email || '',
     mainSubject: user_metadata.mainSubject || '',
     mainGradeLevel: user_metadata.mainGradeLevel || '',
-    hasMultipleGrades: user_metadata.hasMultipleGrades || false
+    hasMultipleGrades: user_metadata.hasMultipleGrades || false,
+    additionalGrades: (user_metadata.additionalGrades || []) as string[],
+    additionalSubjects: (user_metadata.additionalSubjects || []) as string[]
   });
   
   // Derived Adviser Status
@@ -184,7 +189,42 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
     return `${last}, ${first}`;
   };
 
-  // --- Initial Checks ---
+  // --- Initial Checks & Syncing ---
+  
+  // Self-Healing: Sync Profile to 'profiles' table if it doesn't exist
+  // This ensures that existing users appear in the Admin lists
+  const syncUserProfile = async () => {
+    try {
+      // Check if I exist in profiles
+      const { data } = await supabase.from('profiles').select('id, additional_subjects').eq('id', user.id).maybeSingle();
+      
+      if (!data) {
+         console.log("Profile missing, syncing now...");
+         await supabase.from('profiles').insert([{
+           id: user.id,
+           first_name: user_metadata.firstName,
+           last_name: user_metadata.lastName,
+           email: user.email,
+           username: user_metadata.username,
+           role: user_metadata.role,
+           main_subject: user_metadata.mainSubject,
+           main_grade_level: user_metadata.mainGradeLevel,
+           has_multiple_grades: user_metadata.hasMultipleGrades,
+           additional_grades: user_metadata.additionalGrades || [],
+           additional_subjects: user_metadata.additionalSubjects || []
+         }]);
+      } else {
+         // If I exist, ensure local state matches DB (especially for arrays)
+         setUserProfileForm(prev => ({
+            ...prev,
+            additionalSubjects: data.additional_subjects || []
+         }));
+      }
+    } catch (e) {
+      console.error("Error syncing profile:", e);
+    }
+  };
+
   const checkAdviserStatus = async () => {
     setCheckingAdviser(true);
     try {
@@ -243,6 +283,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   };
 
   useEffect(() => {
+    syncUserProfile();
     checkAdviserStatus();
     fetchMySections();
   }, [user.id]);
@@ -515,10 +556,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
       if (secError) throw secError;
       setAllSections(secData || []);
 
-      // 2. Fetch Profiles with extended info
+      // 2. Fetch Profiles with extended info, including email and additional subjects
+      // Note: email is technically in auth.users, but often copied to profiles via triggers. 
+      // If not in profiles, we assume the frontend might not see it unless synced.
+      // We will try to fetch 'email' if it exists in the schema, otherwise just use what we have.
       const { data: profData, error: profError } = await supabase
          .from('profiles')
-         .select('*');
+         .select('*'); // Select all to catch email, additional_subjects etc.
       
       if (profError) {
          console.warn("Could not fetch profiles", profError);
@@ -586,16 +630,49 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
      setLoading(true);
      try {
         const { error } = await supabase.from('profiles').update({
-           main_subject: userProfileForm.mainSubject,
+           first_name: userProfileForm.firstName,
+           last_name: userProfileForm.lastName,
+           // Email usually cannot be changed in profiles directly if it's the auth ID, but if it's a contact email:
+           // email: userProfileForm.email, 
+           // Main Subject is read-only in this form, so we don't update it to avoid overrides if it wasn't meant to change
+           // main_subject: userProfileForm.mainSubject, 
            main_grade_level: userProfileForm.mainGradeLevel,
-           has_multiple_grades: userProfileForm.hasMultipleGrades
+           has_multiple_grades: userProfileForm.hasMultipleGrades,
+           additional_grades: userProfileForm.additionalGrades,
+           additional_subjects: userProfileForm.additionalSubjects
         }).eq('id', user.id);
         
         if(error) throw error;
-        alert("Profile Updated Successfully. Please re-login to see all changes.");
+        
+        // If email was changed and it's allowed:
+        if (userProfileForm.email !== user.email) {
+           const { error: authError } = await supabase.auth.updateUser({ email: userProfileForm.email });
+           if(authError) alert("Profile updated, but failed to update Login Email: " + authError.message);
+           else alert("Profile and Login Email updated! Check your new email for confirmation.");
+        } else {
+           alert("Profile Updated Successfully.");
+        }
         setShowProfileSettings(false);
      } catch(e:any) {
         alert("Error updating profile: " + e.message);
+     } finally {
+        setLoading(false);
+     }
+  };
+
+  const handleResetPassword = async (email: string) => {
+     if (!email) return alert("No email address found for this user.");
+     if (!confirm(`Send password reset email to ${email}?`)) return;
+     
+     setLoading(true);
+     try {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+           redirectTo: window.location.origin
+        });
+        if (error) throw error;
+        alert(`Password reset email sent to ${email}`);
+     } catch(e:any) {
+        alert("Error sending reset email: " + e.message);
      } finally {
         setLoading(false);
      }
@@ -1326,6 +1403,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
          </div>
 
          <div className="flex-1 overflow-auto p-6 bg-slate-50 print:p-0 print:bg-white">
+            {/* ... SF1 to SF9 views remain the same ... */}
+            
             {activeView === 'sf1' && (
                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-auto">
                   <table className="min-w-[3000px] w-full text-xs text-left">
@@ -1391,8 +1470,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                   </table>
                </div>
             )}
-
-            {/* Other Forms omitted for brevity but logic maintained */}
+            
             {activeView === 'sf2' && (
                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-auto">
                   <table className="min-w-[1500px] w-full text-xs text-left">
@@ -1465,6 +1543,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                     const data = calculateSf6Data();
                     return (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        {/* SF6 Tables rendered here - kept concise */}
                         <div>
                            <h3 className="font-bold mb-2">Summary of Status</h3>
                            <table className="w-full border text-sm">
@@ -1497,6 +1576,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
 
             {activeView === 'sf9' && (
                <div className="flex flex-col gap-6">
+                  {/* SF9 Content */}
                   <div className="bg-white p-4 rounded-xl border border-slate-200 print:hidden">
                      <label className="block text-sm font-medium text-slate-700 mb-2">Select Student</label>
                      <select className="w-full border border-slate-300 rounded-lg p-2" onChange={(e) => { const s = students.find(st => st.id === e.target.value); setSf9Student(s || null); }}>
@@ -1638,27 +1718,29 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                 <tr><th className="p-3 border-b">Grade Level</th><th className="p-3 border-b">Section Name</th><th className="p-3 border-b">Class Adviser</th><th className="p-3 border-b">Actions</th></tr>
                              </thead>
                              <tbody>
-                                {allSections.map(sec => {
-                                   // Calculate available teachers for this specific row
-                                   // 1. Must NOT be an adviser in any other section OR matches current adviser
-                                   const availableTeachers = allTeachers.filter(t => 
-                                      !allSections.some(s => s.adviser_id === t.id && s.id !== sec.id) || sec.adviser_id === t.id
-                                   );
-
-                                   return (
+                                {allSections.map(sec => (
                                    <tr key={sec.id} className="border-b hover:bg-slate-50">
                                       <td className="p-3 font-medium">{sec.grade_level}</td>
                                       <td className="p-3">{sec.section_name}</td>
                                       <td className="p-3">
                                          <div className="flex items-center gap-2">
-                                            <select className="border p-1 rounded text-xs w-48" 
+                                            <select className="border p-1 rounded text-xs w-64" 
                                                value={sec.adviser_id || ''} 
                                                onChange={(e) => handleAssignAdviser(sec.id!, e.target.value)}
                                             >
                                                <option value="">-- Assign Adviser --</option>
-                                               {availableTeachers.map(t => (
-                                                  <option key={t.id} value={t.id}>{getTeacherName(t)}</option>
-                                               ))}
+                                               {/* Sort teachers: Available first */}
+                                               {allTeachers.sort((a,b) => (a.last_name||'').localeCompare(b.last_name||'')).map(t => {
+                                                  // Check if already assigned to another section
+                                                  const isAssignedElsewhere = allSections.some(s => s.adviser_id === t.id && s.id !== sec.id);
+                                                  const isCurrent = sec.adviser_id === t.id;
+                                                  
+                                                  return (
+                                                     <option key={t.id} value={t.id} disabled={isAssignedElsewhere && !isCurrent}>
+                                                        {getTeacherName(t)} {isAssignedElsewhere ? '(Already Adviser)' : ''}
+                                                     </option>
+                                                  );
+                                               })}
                                             </select>
                                          </div>
                                       </td>
@@ -1668,7 +1750,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                          </button>
                                       </td>
                                    </tr>
-                                )})}
+                                ))}
                                 {allSections.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-slate-500">No sections found. Add one above.</td></tr>}
                              </tbody>
                           </table>
@@ -1703,23 +1785,45 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                    </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                   {Object.values(Subject).map(sub => (
-                                      <tr key={sub} className="hover:bg-slate-50">
-                                         <td className="p-3 font-medium text-slate-800">{sub}</td>
-                                         <td className="p-3">
-                                            <select 
-                                               className="w-full md:w-96 border border-slate-300 rounded-md p-2 text-sm bg-white"
-                                               value={currentAssignments[sub] || ''}
-                                               onChange={(e) => handleAssignSubjectTeacher(sub, e.target.value)}
-                                            >
-                                               <option value="">-- No Teacher Assigned --</option>
-                                               {allTeachers.map(t => (
-                                                  <option key={t.id} value={t.id}>{getTeacherName(t)}</option>
-                                               ))}
-                                            </select>
-                                         </td>
-                                      </tr>
-                                   ))}
+                                   {Object.values(Subject).map(sub => {
+                                      // 1. Qualified Teachers (Main Subject OR Additional Subjects)
+                                      const qualifiedTeachers = allTeachers.filter(t => 
+                                         t.main_subject === sub || 
+                                         (t.additional_subjects && t.additional_subjects.includes(sub))
+                                      );
+                                      
+                                      // 2. Others (Fallback)
+                                      const otherTeachers = allTeachers.filter(t => !qualifiedTeachers.includes(t));
+
+                                      return (
+                                        <tr key={sub} className="hover:bg-slate-50">
+                                           <td className="p-3 font-medium text-slate-800">{sub}</td>
+                                           <td className="p-3">
+                                              <select 
+                                                 className="w-full md:w-96 border border-slate-300 rounded-md p-2 text-sm bg-white"
+                                                 value={currentAssignments[sub] || ''}
+                                                 onChange={(e) => handleAssignSubjectTeacher(sub, e.target.value)}
+                                              >
+                                                 <option value="">-- No Teacher Assigned --</option>
+                                                 
+                                                 {qualifiedTeachers.length > 0 && (
+                                                    <optgroup label="Recommended Teachers">
+                                                       {qualifiedTeachers.map(t => (
+                                                          <option key={t.id} value={t.id}>{getTeacherName(t)}</option>
+                                                       ))}
+                                                    </optgroup>
+                                                 )}
+                                                 
+                                                 <optgroup label="Other Teachers">
+                                                    {otherTeachers.map(t => (
+                                                       <option key={t.id} value={t.id}>{getTeacherName(t)} ({t.main_subject})</option>
+                                                    ))}
+                                                 </optgroup>
+                                              </select>
+                                           </td>
+                                        </tr>
+                                      );
+                                   })}
                                 </tbody>
                              </table>
                           </div>
@@ -1740,17 +1844,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                              <thead className="bg-purple-50 text-purple-900 font-bold">
                                 <tr>
                                    <th className="p-3 border-b">Name</th>
-                                   <th className="p-3 border-b">Username</th>
+                                   <th className="p-3 border-b">Email / Username</th>
                                    <th className="p-3 border-b">Assigned Grade</th>
                                    <th className="p-3 border-b">Assigned Subject</th>
                                    <th className="p-3 border-b">Role</th>
+                                   <th className="p-3 border-b">Actions</th>
                                 </tr>
                              </thead>
                              <tbody className="divide-y divide-slate-100">
                                 {allTeachers.map(t => (
                                    <tr key={t.id} className="hover:bg-slate-50">
                                       <td className="p-3 font-medium">{getTeacherName(t)}</td>
-                                      <td className="p-3">{t.username || 'N/A'}</td>
+                                      <td className="p-3">
+                                         <div className="flex flex-col">
+                                            <span>{t.email || 'No email'}</span>
+                                            <span className="text-xs text-slate-400">{t.username}</span>
+                                         </div>
+                                      </td>
                                       <td className="p-3">
                                          <select 
                                             className="border rounded p-1 text-xs w-28" 
@@ -1771,7 +1881,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                             {Object.values(Subject).map(s => <option key={s} value={s}>{s}</option>)}
                                          </select>
                                       </td>
-                                      <td className="p-3 flex items-center gap-2">
+                                      <td className="p-3">
                                          <select 
                                             className={`border rounded p-1 text-xs font-bold ${
                                                t.role === 'Admin' ? 'bg-purple-50 text-purple-700 border-purple-200' :
@@ -1787,6 +1897,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                             <option value="Admin">Admin</option>
                                          </select>
                                       </td>
+                                      <td className="p-3">
+                                         <button 
+                                            onClick={() => handleResetPassword(t.email || '')} 
+                                            className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded flex items-center gap-1 border"
+                                            title="Send Password Reset Email"
+                                         >
+                                            <Key className="h-3 w-3"/> Reset
+                                         </button>
+                                      </td>
                                    </tr>
                                 ))}
                              </tbody>
@@ -1800,6 +1919,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
             {/* Class Record View */}
             {activeView === 'class_record' && (
               <div className="space-y-6">
+                {/* ... Class Record UI (omitted for brevity, unchanged) ... */}
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 print:hidden">
                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-4">
                      <Select 
@@ -1978,30 +2098,71 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
             {/* PROFILE SETTINGS MODAL */}
             {showProfileSettings && (
                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-fadeIn">
-                  <div className="bg-white rounded-xl shadow-xl max-w-lg w-full overflow-hidden">
+                  <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full overflow-hidden max-h-[90vh] flex flex-col">
                      <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-green-50">
                         <h2 className="text-xl font-bold text-green-900 flex items-center gap-2">
                            <Settings className="h-5 w-5"/> Profile Settings
                         </h2>
                         <button onClick={() => setShowProfileSettings(false)}><X className="h-5 w-5 text-slate-400 hover:text-red-500"/></button>
                      </div>
-                     <form onSubmit={handleUpdateMyProfile} className="p-6 space-y-6">
-                        <div className="space-y-4">
-                           <Select 
-                              label="Main Subject"
-                              value={userProfileForm.mainSubject}
-                              onChange={(e) => setUserProfileForm({...userProfileForm, mainSubject: e.target.value})}
-                              options={Object.values(Subject)}
-                           />
-                           
-                           <Select 
-                              label="Main Grade Level"
-                              value={userProfileForm.mainGradeLevel}
-                              onChange={(e) => setUserProfileForm({...userProfileForm, mainGradeLevel: e.target.value})}
-                              options={Object.values(GradeLevel)}
-                           />
-                           
-                           <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                     <form onSubmit={handleUpdateMyProfile} className="flex-1 overflow-y-auto p-6 space-y-6">
+                        
+                        {/* Personal Info */}
+                        <section>
+                           <h3 className="font-bold text-slate-700 border-b pb-2 mb-4">Personal Information</h3>
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <Input 
+                                 label="First Name" 
+                                 value={userProfileForm.firstName}
+                                 onChange={e => setUserProfileForm({...userProfileForm, firstName: e.target.value})}
+                                 required
+                              />
+                              <Input 
+                                 label="Last Name" 
+                                 value={userProfileForm.lastName}
+                                 onChange={e => setUserProfileForm({...userProfileForm, lastName: e.target.value})}
+                                 required
+                              />
+                              <div className="md:col-span-2">
+                                 <Input 
+                                    label="Email Address (Login)" 
+                                    type="email"
+                                    value={userProfileForm.email}
+                                    onChange={e => setUserProfileForm({...userProfileForm, email: e.target.value})}
+                                    required
+                                 />
+                                 <p className="text-xs text-slate-500 mt-1">Changing email will require re-confirmation.</p>
+                              </div>
+                           </div>
+                        </section>
+
+                        {/* Main Assignment */}
+                        <section>
+                           <h3 className="font-bold text-slate-700 border-b pb-2 mb-4">Main Assignment</h3>
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="opacity-70 pointer-events-none bg-slate-50 rounded-lg p-1 relative">
+                                 <Select 
+                                    label="Main Subject (Locked)"
+                                    value={userProfileForm.mainSubject}
+                                    onChange={() => {}} 
+                                    options={Object.values(Subject)}
+                                    disabled
+                                 />
+                                 <Lock className="h-4 w-4 absolute top-8 right-8 text-slate-400" />
+                                 <p className="text-xs text-slate-500 px-1 mt-1">To change your main subject, please contact Admin.</p>
+                              </div>
+                              <Select 
+                                 label="Main Grade Level"
+                                 value={userProfileForm.mainGradeLevel}
+                                 onChange={(e) => setUserProfileForm({...userProfileForm, mainGradeLevel: e.target.value})}
+                                 options={Object.values(GradeLevel)}
+                              />
+                           </div>
+                        </section>
+                        
+                        {/* Multi-Grade / Multi-Subject */}
+                        <section className="bg-slate-50 rounded-lg p-6 border border-slate-200">
+                           <div className="flex items-center mb-4">
                               <label className="flex items-center cursor-pointer select-none">
                                  <div className="relative">
                                     <input 
@@ -2016,13 +2177,65 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                  </div>
                                  <span className="ml-3 text-sm text-slate-700 font-medium">I teach multiple subjects/grades</span>
                               </label>
-                              <p className="text-xs text-slate-500 mt-2 pl-8">
-                                 Enable this if you handle classes outside your main grade level assignment.
-                              </p>
                            </div>
-                        </div>
+
+                           {userProfileForm.hasMultipleGrades && (
+                              <div className="space-y-6 animate-fadeIn">
+                                 {/* Additional Subjects */}
+                                 <div>
+                                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Additional Subjects</p>
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                       {Object.values(Subject).map(sub => {
+                                          if (sub === userProfileForm.mainSubject) return null;
+                                          const isSelected = userProfileForm.additionalSubjects.includes(sub);
+                                          return (
+                                             <div key={sub} 
+                                                onClick={() => {
+                                                   const current = userProfileForm.additionalSubjects;
+                                                   const updated = isSelected ? current.filter(s => s !== sub) : [...current, sub];
+                                                   setUserProfileForm({...userProfileForm, additionalSubjects: updated});
+                                                }}
+                                                className={`text-xs p-2 rounded border cursor-pointer flex items-center gap-2 ${isSelected ? 'bg-green-100 border-green-400 text-green-900' : 'bg-white border-slate-200 hover:border-green-300'}`}
+                                             >
+                                                <div className={`w-3 h-3 rounded-sm border flex items-center justify-center ${isSelected ? 'bg-green-600 border-green-600' : 'border-slate-300'}`}>
+                                                   {isSelected && <Check className="w-2 h-2 text-white" />}
+                                                </div>
+                                                {sub}
+                                             </div>
+                                          );
+                                       })}
+                                    </div>
+                                 </div>
+
+                                 {/* Additional Grades */}
+                                 <div>
+                                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Additional Grade Levels</p>
+                                    <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+                                       {Object.values(GradeLevel).map(gl => {
+                                          const isSelected = userProfileForm.additionalGrades.includes(gl);
+                                          return (
+                                             <div key={gl} 
+                                                onClick={() => {
+                                                   const current = userProfileForm.additionalGrades;
+                                                   const updated = isSelected ? current.filter(g => g !== gl) : [...current, gl];
+                                                   setUserProfileForm({...userProfileForm, additionalGrades: updated});
+                                                }}
+                                                className={`text-xs p-2 rounded border cursor-pointer flex items-center gap-2 ${isSelected ? 'bg-blue-50 border-blue-400 text-blue-900' : 'bg-white border-slate-200 hover:border-blue-300'}`}
+                                             >
+                                                <div className={`w-3 h-3 rounded-sm border flex items-center justify-center ${isSelected ? 'bg-blue-600 border-blue-600' : 'border-slate-300'}`}>
+                                                   {isSelected && <Check className="w-2 h-2 text-white" />}
+                                                </div>
+                                                {gl}
+                                             </div>
+                                          );
+                                       })}
+                                    </div>
+                                 </div>
+                              </div>
+                           )}
+                        </section>
                         
-                        <div className="pt-2 flex justify-end gap-3">
+                        <div className="pt-2 flex justify-end gap-3 border-t border-slate-100 mt-4">
                            <Button type="button" variant="outline" onClick={() => setShowProfileSettings(false)}>Cancel</Button>
                            <Button type="submit" isLoading={loading}>Save Changes</Button>
                         </div>

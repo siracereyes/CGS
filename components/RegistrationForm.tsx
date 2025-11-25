@@ -76,6 +76,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onNavigateTo
       // Determine the redirect URL. This ensures the email link comes back to THIS app.
       const redirectUrl = window.location.origin;
 
+      // 1. Create Auth User
       const { data, error } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
@@ -95,12 +96,30 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onNavigateTo
         }
       });
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
+      if (!data.user) throw new Error("Registration failed. No user was created.");
 
-      if (!data.user) {
-        throw new Error("Registration failed. No user was created.");
+      // 2. Insert into Public Profiles Table immediately
+      // This ensures the user appears in Admin lists even before they log in for the first time.
+      const { error: profileError } = await supabase.from('profiles').insert([{
+        id: data.user.id,
+        first_name: formData.firstName,
+        last_name: formData.lastName,
+        email: formData.email,
+        username: formData.username,
+        role: formData.role,
+        main_subject: formData.mainSubject,
+        main_grade_level: formData.mainGradeLevel,
+        has_multiple_grades: formData.hasMultipleGrades,
+        additional_grades: formData.additionalGrades,
+        // Default additional subjects to empty array
+        additional_subjects: [] 
+      }]);
+
+      if (profileError) {
+         console.warn("Profile creation warning:", profileError);
+         // We don't throw here, as the auth user was created successfully.
+         // The Dashboard has a self-healing mechanism to fix missing profiles on login.
       }
 
       console.log("Registration Successful");
@@ -117,8 +136,6 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onNavigateTo
         message = err.message;
       } else if (err && typeof err === 'object' && 'message' in err) {
         message = String(err.message);
-      } else if (err && typeof err === 'object' && 'error_description' in err) {
-         message = String(err.error_description);
       }
       
       setErrorMsg(message);

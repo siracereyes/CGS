@@ -44,6 +44,7 @@ export interface RegistrationData {
   mainGradeLevel: GradeLevel | '';
   hasMultipleGrades: boolean;
   additionalGrades: GradeLevel[];
+  additionalSubjects?: Subject[]; // Added for consistency
 }
 
 export interface Student {
@@ -201,9 +202,11 @@ export interface SimpleTeacherProfile {
   id: string;
   first_name: string;
   last_name: string;
+  email?: string; // Added
   main_subject: string;
   main_grade_level?: string;
   additional_grades?: string[];
+  additional_subjects?: string[]; // Added
   role?: string;
   username?: string;
   has_multiple_grades?: boolean;
