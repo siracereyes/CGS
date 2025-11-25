@@ -372,7 +372,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
       const { data, error } = await supabase.from('attendance_records').select('*').eq('month_key', selectedMonth);
       if (error) throw error;
       const recordMap: Record<string, AttendanceState> = {};
-      data?.forEach((rec: AttendanceRecord) => { recordMap[rec.student_id] = { days: rec.attendance_data || {}, remarks: rec.remarks || '' }; });
+      const records = (data || []) as unknown as AttendanceRecord[];
+      records.forEach((rec) => { 
+        recordMap[rec.student_id] = { days: rec.attendance_data || {}, remarks: rec.remarks || '' }; 
+      });
       setAttendanceRecords(recordMap);
     } catch (err: any) {
       const msg = getErrorMessage(err);
@@ -628,7 +631,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
 
   const handleAttendanceToggle = (studentId: string, day: string) => {
     setAttendanceRecords((prev: Record<string, AttendanceState>) => {
-      const current = prev[studentId] || { days: {}, remarks: '' };
+      const current: AttendanceState = prev[studentId] || { days: {}, remarks: '' };
       const status = current.days[day];
       const nextStatus: AttendanceStatus = status === undefined ? 'x' : status === 'x' ? 'T' : status === 'T' ? '' : 'x';
       const newDays = { ...current.days };
@@ -636,7 +639,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
       return { ...prev, [studentId]: { ...current, days: newDays } };
     });
   };
-  const handleAttendanceRemarkChange = (id: string, val: string) => setAttendanceRecords((p: Record<string, AttendanceState>) => ({ ...p, [id]: { ...(p[id] || { days: {}, remarks: '' }), remarks: val } }));
+
+  const handleAttendanceRemarkChange = (id: string, val: string) => 
+    setAttendanceRecords((p: Record<string, AttendanceState>) => {
+       const current: AttendanceState = p[id] || { days: {}, remarks: '' };
+       return { ...p, [id]: { ...current, remarks: val } };
+    });
+
   const saveAttendance = async () => {
     setSavingAttendance(true);
     try {
@@ -1010,7 +1019,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   };
 
   const renderSf2Row = (s: Student, idx: number) => {
-    const record = attendanceRecords[s.id!] || { days: {}, remarks: '' };
+    const record: AttendanceState = attendanceRecords[s.id!] || { days: {}, remarks: '' };
     const absences = Object.values(record.days).filter(d => d === 'x').length;
     const tardies = Object.values(record.days).filter(d => d === 'T').length;
     return (
