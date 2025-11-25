@@ -206,6 +206,7 @@ export interface SimpleTeacherProfile {
   additional_grades?: string[];
   role?: string;
   username?: string;
+  has_multiple_grades?: boolean;
 }
 
 // --- Class Record Types ---

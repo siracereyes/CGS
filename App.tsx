@@ -1,11 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { LoginForm } from './components/LoginForm';
 import { RegistrationForm } from './components/RegistrationForm';
 import { TeacherDashboard } from './components/TeacherDashboard';
-import { LogOut, AlertTriangle, UserCircle, Database, Link as LinkIcon, Save } from 'lucide-react';
+import { AlertTriangle, Database, Link as LinkIcon, Save } from 'lucide-react';
 import { supabase, isConfigured, saveSupabaseConfig, clearSupabaseConfig } from './lib/supabaseClient';
 import { Button } from './components/ui/Button';
-import { Input } from './components/ui/Input';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<'login' | 'register'>('login');
@@ -75,10 +75,6 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-  };
-  
   const handleManualConnect = (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualUrl || !manualKey) {
@@ -86,18 +82,6 @@ export default function App() {
       return;
     }
     saveSupabaseConfig(manualUrl, manualKey);
-  };
-
-  // Helper to get user display info
-  const getUserDisplayName = () => {
-    if (!session?.user?.user_metadata) return 'User';
-    const { firstName, lastName, email } = session.user.user_metadata;
-    if (firstName && lastName) return `${firstName} ${lastName}`;
-    return email || session.user.email;
-  };
-
-  const getUserRole = () => {
-    return session?.user?.user_metadata?.role || 'Guest';
   };
 
   // Render Configuration Error / Manual Setup Screen
@@ -172,52 +156,36 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      {/* Header / Navbar */}
-      <header className="bg-green-800 text-white shadow-md z-10 relative border-b-4 border-yellow-500">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="bg-white p-1 rounded-full shadow-lg">
-              <img 
-                src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSD_sDccF9FqKwyxF0rgvVKQpfEgOWyseZ0LQ&s" 
-                alt="School Logo" 
-                className="h-12 w-12 rounded-full"
-              />
+      {/* Header / Navbar - Only for Public Pages */}
+      {!session && (
+        <header className="bg-green-800 text-white shadow-md z-10 relative border-b-4 border-yellow-500">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="bg-white p-1 rounded-full shadow-lg">
+                <img 
+                  src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSD_sDccF9FqKwyxF0rgvVKQpfEgOWyseZ0LQ&s" 
+                  alt="School Logo" 
+                  className="h-12 w-12 rounded-full"
+                />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-bold text-lg md:text-xl tracking-tight leading-none text-white shadow-sm">
+                  Ramon Magsaysay (CUBAO) High School
+                </span>
+                <span className="text-xs text-yellow-200 uppercase tracking-wider font-semibold mt-1">
+                  Centralized Grading System
+                </span>
+              </div>
             </div>
-            <div className="flex flex-col">
-              <span className="font-bold text-lg md:text-xl tracking-tight leading-none text-white shadow-sm">
-                Ramon Magsaysay (CUBAO) High School
-              </span>
-              <span className="text-xs text-yellow-200 uppercase tracking-wider font-semibold mt-1">
-                Centralized Grading System
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            {/* Show Connection Reset for Admin Debugging if needed */}
-            {!session && isConfigured && (
+            {/* Show Connection Reset for Debugging if needed */}
+            {isConfigured && (
                <button onClick={clearSupabaseConfig} className="text-xs text-green-200 hover:text-white underline mr-2">
-                 Reset Connection
+                 Reset Config
                </button>
             )}
-            
-            {session && (
-              <div className="flex items-center gap-4 bg-green-900/50 py-1.5 px-4 rounded-full border border-green-700/50">
-                <div className="text-right hidden sm:block">
-                  <div className="text-sm font-bold leading-none">{getUserDisplayName()}</div>
-                  <div className="text-xs text-yellow-200 font-medium">{getUserRole()}</div>
-                </div>
-                <div className="h-8 w-8 bg-green-700 rounded-full flex items-center justify-center text-xs font-bold border-2 border-green-600">
-                  {getUserDisplayName().charAt(0)}
-                </div>
-                <div className="h-6 w-px bg-green-700 mx-1"></div>
-                <Button variant="ghost" className="text-white hover:text-white hover:bg-white/10 p-1 h-auto" onClick={handleSignOut} title="Sign Out">
-                  <LogOut className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
           </div>
-        </div>
-      </header>
+        </header>
+      )}
 
       {/* Main Content */}
       {session ? (
