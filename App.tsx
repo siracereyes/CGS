@@ -2,35 +2,51 @@ import React, { useState, useEffect } from 'react';
 import { LoginForm } from './components/LoginForm';
 import { RegistrationForm } from './components/RegistrationForm';
 import { TeacherDashboard } from './components/TeacherDashboard';
-import { LogOut, AlertTriangle, UserCircle } from 'lucide-react';
-import { supabase } from './lib/supabaseClient';
+import { LogOut, AlertTriangle, UserCircle, Database, Link as LinkIcon, Save } from 'lucide-react';
+import { supabase, isConfigured, saveSupabaseConfig, clearSupabaseConfig } from './lib/supabaseClient';
 import { Button } from './components/ui/Button';
+import { Input } from './components/ui/Input';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<'login' | 'register'>('login');
   const [session, setSession] = useState<any>(null);
   const [configError, setConfigError] = useState<string | null>(null);
+  
+  // State for Manual Setup Form
+  const [manualUrl, setManualUrl] = useState('');
+  const [manualKey, setManualKey] = useState('');
 
   useEffect(() => {
     const initSession = async () => {
+      // 1. Immediate Configuration Check
+      if (!isConfigured) {
+        setConfigError("Database not configured.");
+        return;
+      }
+
       try {
-        // 1. Light check for connection using a public table or just check session
-        // If the URL is bad (placeholder), even checking session might not throw until we try to fetch something.
-        // Let's try to get the session first.
+        // 2. Connectivity Check (Ping)
+        // We attempt a lightweight request. If this throws a network error, the URL/Key is likely wrong.
+        const { error: pingError } = await supabase.from('profiles').select('count', { count: 'exact', head: true });
+        
+        if (pingError) {
+           console.warn("Connection Ping Failed:", pingError);
+           if (pingError.message.includes('Fetch') || pingError.message.includes('Failed to fetch')) {
+              setConfigError("Cannot connect to database. URL might be invalid.");
+              return;
+           }
+        }
+
+        // 3. Session Check
         const { data, error } = await supabase.auth.getSession();
         
         if (error) {
           console.error("Supabase Session Error:", error);
           if (error.message.includes('Fetch') || error.message.includes('URL') || error.message.includes('apikey')) {
-            setConfigError("Failed to connect to database. Please check your API Keys in Vercel.");
+            setConfigError("Failed to connect to database. Please check your API Keys.");
             return;
           }
         }
-        
-        // 2. Extra verification: Try a simple fetch to ensure the URL is valid
-        // The placeholder URL often doesn't fail 'getSession' immediately because it might check local storage only.
-        // We'll try to hit a robust endpoint or just wait for user interaction. 
-        // But users reported "Failed to fetch" on login, implying `getSession` passed locally but network failed later.
         
         setSession(data.session);
         if (data.session) {
@@ -46,7 +62,7 @@ export default function App() {
 
     initSession();
 
-    // 2. Listen for auth changes
+    // 4. Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -62,6 +78,15 @@ export default function App() {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
   };
+  
+  const handleManualConnect = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualUrl || !manualKey) {
+      alert("Please enter both URL and Key");
+      return;
+    }
+    saveSupabaseConfig(manualUrl, manualKey);
+  };
 
   // Helper to get user display info
   const getUserDisplayName = () => {
@@ -75,27 +100,71 @@ export default function App() {
     return session?.user?.user_metadata?.role || 'Guest';
   };
 
-  // Render Configuration Error Screen if critical failure
+  // Render Configuration Error / Manual Setup Screen
   if (configError) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white max-w-lg w-full rounded-xl shadow-xl border border-red-200 p-8 text-center">
-          <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-            <AlertTriangle className="h-8 w-8 text-red-600" />
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
+        <div className="bg-white max-w-lg w-full rounded-xl shadow-xl border border-red-200 overflow-hidden">
+          <div className="bg-red-50 p-6 border-b border-red-100 flex items-center gap-4">
+             <div className="bg-red-100 p-2 rounded-full">
+               <AlertTriangle className="h-6 w-6 text-red-600" />
+             </div>
+             <div>
+               <h1 className="text-lg font-bold text-red-900">Connection Setup Required</h1>
+               <p className="text-red-700 text-sm">Application cannot reach the database.</p>
+             </div>
           </div>
-          <h1 className="text-xl font-bold text-slate-900 mb-2">Configuration Error</h1>
-          <p className="text-slate-600 mb-6">{configError}</p>
-          <div className="bg-slate-100 p-4 rounded text-left text-xs font-mono text-slate-700 mb-6 overflow-x-auto">
-            <p><strong>Troubleshooting for Vercel:</strong></p>
-            <p>1. Go to your Vercel Dashboard {'>'} Settings {'>'} Environment Variables.</p>
-            <p>2. Ensure you have added:</p>
-            <ul className="list-disc ml-4 mt-1">
-              <li><code>VITE_SUPABASE_URL</code></li>
-              <li><code>VITE_SUPABASE_ANON_KEY</code></li>
-            </ul>
-            <p className="mt-2">3. Redeploy your application after adding these keys.</p>
+          
+          <div className="p-8">
+            <p className="text-slate-600 mb-6 text-sm">
+              The environment variables are missing or incorrect. You can manually connect by entering your Supabase credentials below. These will be saved securely in your browser.
+            </p>
+            
+            <form onSubmit={handleManualConnect} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Supabase Project URL</label>
+                <div className="relative">
+                   <LinkIcon className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                   <input 
+                      type="url" 
+                      required
+                      placeholder="https://your-project.supabase.co"
+                      className="pl-9 w-full rounded-lg border border-slate-300 p-2 text-sm focus:ring-2 focus:ring-green-500 outline-none"
+                      value={manualUrl}
+                      onChange={e => setManualUrl(e.target.value)}
+                   />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Supabase Anon Key</label>
+                <div className="relative">
+                   <Database className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                   <input 
+                      type="password" 
+                      required
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR..."
+                      className="pl-9 w-full rounded-lg border border-slate-300 p-2 text-sm focus:ring-2 focus:ring-green-500 outline-none"
+                      value={manualKey}
+                      onChange={e => setManualKey(e.target.value)}
+                   />
+                </div>
+              </div>
+
+              <div className="pt-4">
+                <Button type="submit" className="w-full">
+                  <Save className="h-4 w-4 mr-2" />
+                  Save & Connect
+                </Button>
+              </div>
+            </form>
+
+            <div className="mt-6 pt-4 border-t border-slate-100 text-center">
+              <p className="text-xs text-slate-400">
+                To fix this permanently, add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> to your Vercel Project Settings.
+              </p>
+            </div>
           </div>
-          <Button onClick={() => window.location.reload()}>Retry Connection</Button>
         </div>
       </div>
     );
@@ -124,6 +193,13 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
+            {/* Show Connection Reset for Admin Debugging if needed */}
+            {!session && isConfigured && (
+               <button onClick={clearSupabaseConfig} className="text-xs text-green-200 hover:text-white underline mr-2">
+                 Reset Connection
+               </button>
+            )}
+            
             {session && (
               <div className="flex items-center gap-4 bg-green-900/50 py-1.5 px-4 rounded-full border border-green-700/50">
                 <div className="text-right hidden sm:block">

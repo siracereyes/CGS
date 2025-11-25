@@ -17,14 +17,24 @@ const getEnvVar = (key: string): string | undefined => {
   return undefined;
 };
 
-// Search for URL in priority order
+// Check Local Storage for overrides (Manual Setup Mode)
+const getStoredVar = (key: string): string | null => {
+  if (typeof window !== 'undefined') {
+    return localStorage.getItem(key);
+  }
+  return null;
+};
+
+// Search for URL in priority order: LocalStorage -> Vite Env -> Process Env
 const SUPABASE_URL = 
+  getStoredVar('VITE_SUPABASE_URL') ||
   getEnvVar('VITE_SUPABASE_URL') || 
   getEnvVar('REACT_APP_SUPABASE_URL') || 
   getEnvVar('SUPABASE_URL');
 
-// Search for Key in priority order, including the user's mentioned "API_KEY"
+// Search for Key in priority order
 const SUPABASE_ANON_KEY = 
+  getStoredVar('VITE_SUPABASE_ANON_KEY') ||
   getEnvVar('VITE_SUPABASE_ANON_KEY') || 
   getEnvVar('REACT_APP_SUPABASE_ANON_KEY') || 
   getEnvVar('SUPABASE_ANON_KEY') || 
@@ -34,14 +44,70 @@ const SUPABASE_ANON_KEY =
 // Debugging: Check if keys are loaded
 console.log("Supabase Client Init:", { 
   hasUrl: !!SUPABASE_URL, 
-  urlCheck: SUPABASE_URL ? (SUPABASE_URL.substring(0, 15) + "...") : "MISSING",
-  hasKey: !!SUPABASE_ANON_KEY
+  urlCheck: SUPABASE_URL ? (SUPABASE_URL.substring(0, 8) + "..." + SUPABASE_URL.slice(-3)) : "MISSING",
+  hasKey: !!SUPABASE_ANON_KEY,
+  source: getStoredVar('VITE_SUPABASE_URL') ? 'LocalStorage' : 'EnvVar'
 });
 
+// Custom Fetch with Retry Logic to handle Vercel/Edge network blips
+const fetchWithRetry = async (url: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
+  const MAX_RETRIES = 3;
+  let attempt = 0;
+  
+  while (true) {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      attempt++;
+      console.warn(`Supabase fetch failed (attempt ${attempt}/${MAX_RETRIES}):`, error);
+      
+      if (attempt >= MAX_RETRIES) {
+        throw error;
+      }
+      
+      // Exponential backoff: 500ms, 1000ms, 2000ms
+      const delay = 500 * Math.pow(2, attempt - 1);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+};
+
+// Determine if configured (not using placeholders)
+export const isConfigured = 
+  !!SUPABASE_URL && 
+  !SUPABASE_URL.includes('placeholder') && 
+  !!SUPABASE_ANON_KEY && 
+  !SUPABASE_ANON_KEY.includes('placeholder');
+
+// Helper to save config manually from UI
+export const saveSupabaseConfig = (url: string, key: string) => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('VITE_SUPABASE_URL', url.trim());
+    localStorage.setItem('VITE_SUPABASE_ANON_KEY', key.trim());
+    window.location.reload(); // Reload to re-initialize client
+  }
+};
+
+export const clearSupabaseConfig = () => {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('VITE_SUPABASE_URL');
+    localStorage.removeItem('VITE_SUPABASE_ANON_KEY');
+    window.location.reload();
+  }
+};
+
 // Export the client
-// If keys are missing, we create a client that points to a dummy URL. 
-// App.tsx will catch the connection error and show a "Setup Required" screen.
 export const supabase = createClient(
   SUPABASE_URL || 'https://placeholder.supabase.co', 
-  SUPABASE_ANON_KEY || 'placeholder'
+  SUPABASE_ANON_KEY || 'placeholder',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    },
+    global: {
+      fetch: fetchWithRetry
+    }
+  }
 );
