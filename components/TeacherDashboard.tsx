@@ -209,7 +209,7 @@ begin
   return (
     select email 
     from public.profiles 
-    where username = username_input 
+    where lower(username) = lower(username_input) 
     limit 1
   );
 end;
@@ -379,6 +379,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   };
 
   // Helper to safely get teacher name regardless of case (snake vs camel)
+  const getTeacherLabel = (t: any) => {
+    if (!t) return 'Unknown';
+    const first = t.first_name || t.firstName || '';
+    const last = t.last_name || t.lastName || '';
+    const role = t.role ? ` (${t.role})` : '';
+    return `${last}, ${first}${role}`;
+  };
+
   const getTeacherName = (t: any) => {
     if (!t) return 'Unknown';
     const first = t.first_name || t.firstName || '';
@@ -516,12 +524,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
       .filter(a => a.section_id === currentSectionId)
       .map(a => a.subject);
 
-    // 3. If I am the ADVISER, I should also be able to see my Main Subject (from registration)
-    //    or simply assume Advisers can teach their main subject to their own section.
-    if (adviserSection && adviserSection.id === currentSectionId && user_metadata.mainSubject) {
-      if (!assignedSubjects.includes(user_metadata.mainSubject)) {
-        assignedSubjects.push(user_metadata.mainSubject);
-      }
+    // 3. If I am the ADVISER, I should also be able to see my Main Subject AND Additional Subjects
+    if (adviserSection && adviserSection.id === currentSectionId) {
+       // Add Main Subject
+       if (userProfileForm.mainSubject && !assignedSubjects.includes(userProfileForm.mainSubject)) {
+          assignedSubjects.push(userProfileForm.mainSubject);
+       }
+       // Add Additional Subjects
+       if (userProfileForm.additionalSubjects && userProfileForm.additionalSubjects.length > 0) {
+          userProfileForm.additionalSubjects.forEach(s => {
+             if(!assignedSubjects.includes(s)) assignedSubjects.push(s);
+          });
+       }
     }
 
     // 4. Set available subjects
@@ -539,7 +553,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
        setCrSelection(prev => ({ ...prev, subject: '' }));
     }
 
-  }, [crSelection.section, crSelection.grade, mySections, mySubjectAssignments, adviserSection, user_metadata.mainSubject]);
+  }, [crSelection.section, crSelection.grade, mySections, mySubjectAssignments, adviserSection, userProfileForm]);
 
   // --- Data Fetching ---
   const fetchStudents = async () => {
@@ -853,6 +867,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
            }
            throw error;
         }
+
+        // NEW: Update Auth Metadata to keep session fresh
+        const { error: metaError } = await supabase.auth.updateUser({
+           data: {
+              firstName: userProfileForm.firstName,
+              lastName: userProfileForm.lastName,
+              mainGradeLevel: userProfileForm.mainGradeLevel,
+              hasMultipleGrades: userProfileForm.hasMultipleGrades,
+              additionalGrades: userProfileForm.additionalGrades,
+              additionalSubjects: userProfileForm.additionalSubjects
+           }
+        });
         
         // Update auth email if changed
         if (userProfileForm.email !== user.email) {
@@ -1332,9 +1358,43 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
         if(scorePayload.length > 0) {
            const { error: scoreError } = await supabase.from('class_record_scores').upsert(scorePayload, { onConflict: 'student_id, subject, quarter' });
            if(scoreError) throw scoreError;
+
+           // 3. AUTOMATIC SYNC TO SF9 (Report Card)
+           // We extract the calculated Quarterly Grade and push it to the subject_grades table.
+           const currentQuarterField = `quarter_${crSelection.quarter}` as keyof SubjectGrade;
+           const currentSubject = crSelection.subject;
+           const studentIds = scorePayload.map(s => s.student_id);
+
+           // Fetch existing SF9 records for these students/subject to avoid overwriting other quarters
+           const { data: existingSf9 } = await supabase
+              .from('subject_grades')
+              .select('*')
+              .in('student_id', studentIds)
+              .eq('subject', currentSubject);
+
+           const sf9Payload = scorePayload.map(sc => {
+              const finalGrade = sc.quarterly_grade;
+              // Find existing or create new
+              const existing = existingSf9?.find((r:any) => r.student_id === sc.student_id) || {
+                 student_id: sc.student_id,
+                 subject: currentSubject
+              };
+              
+              return {
+                 ...existing,
+                 [currentQuarterField]: finalGrade
+              };
+           });
+
+           // Upsert to SF9 table
+           const { error: sf9Error } = await supabase
+              .from('subject_grades')
+              .upsert(sf9Payload, { onConflict: 'student_id, subject' });
+              
+           if(sf9Error) console.warn("SF9 Sync Warning:", sf9Error);
         }
 
-        alert("Class Record Saved Successfully!");
+        alert("Class Record Saved & Synced to SF9!");
      } catch(e:any) {
         alert("Error saving: " + getErrorMessage(e));
      } finally {
@@ -1997,7 +2057,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                                      
                                                      return (
                                                         <option key={t.id} value={t.id} disabled={isAssignedElsewhere && !isCurrent}>
-                                                           {getTeacherName(t)} {isAssignedElsewhere ? `(Assigned to ${assignedSec?.section_name})` : ''}
+                                                           {getTeacherLabel(t)} {isAssignedElsewhere ? `(Assigned to ${assignedSec?.section_name})` : ''}
                                                         </option>
                                                      );
                                                   };
@@ -2083,12 +2143,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                           return subjectMatch && gradeMatch;
                                       });
                                       
-                                      // 2. Others (Fallback - Just Subject Match)
-                                      const otherTeachers = allTeachers.filter(t => {
+                                      // 2. Others (Subject Match Only)
+                                      const subjectMatchOnly = allTeachers.filter(t => {
                                           const addSubjects = t.additional_subjects || [];
                                           const subjectMatch = t.main_subject === sub || addSubjects.includes(sub);
                                           return subjectMatch && !qualifiedTeachers.includes(t);
                                       });
+                                      
+                                      // 3. Fallback (Everyone else)
+                                      const others = allTeachers.filter(t => !qualifiedTeachers.includes(t) && !subjectMatchOnly.includes(t));
 
                                       return (
                                         <tr key={sub} className="hover:bg-slate-50">
@@ -2104,15 +2167,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                                  {qualifiedTeachers.length > 0 && (
                                                     <optgroup label="Recommended (Subject & Grade Match)">
                                                        {qualifiedTeachers.map(t => (
-                                                          <option key={t.id} value={t.id}>{getTeacherName(t)}</option>
+                                                          <option key={t.id} value={t.id}>{getTeacherLabel(t)}</option>
                                                        ))}
                                                     </optgroup>
                                                  )}
                                                  
-                                                 {otherTeachers.length > 0 && (
-                                                    <optgroup label="Other Teachers (Subject Match Only)">
-                                                       {otherTeachers.map(t => (
-                                                          <option key={t.id} value={t.id}>{getTeacherName(t)}</option>
+                                                 {subjectMatchOnly.length > 0 && (
+                                                    <optgroup label="Subject Match">
+                                                       {subjectMatchOnly.map(t => (
+                                                          <option key={t.id} value={t.id}>{getTeacherLabel(t)}</option>
+                                                       ))}
+                                                    </optgroup>
+                                                 )}
+                                                 
+                                                 {others.length > 0 && (
+                                                    <optgroup label="All Other Faculty">
+                                                       {others.map(t => (
+                                                          <option key={t.id} value={t.id}>{getTeacherLabel(t)}</option>
                                                        ))}
                                                     </optgroup>
                                                  )}
@@ -2151,7 +2222,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                              <tbody className="divide-y divide-slate-100">
                                 {allTeachers.map(t => (
                                    <tr key={t.id} className="hover:bg-slate-50">
-                                      <td className="p-3 font-medium">{getTeacherName(t)}</td>
+                                      <td className="p-3 font-medium">{getTeacherLabel(t)}</td>
                                       <td className="p-3">
                                          <div className="flex flex-col">
                                             <span>{t.email || 'No email'}</span>
