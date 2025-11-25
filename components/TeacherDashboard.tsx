@@ -627,7 +627,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   };
 
   const handleAttendanceToggle = (studentId: string, day: string) => {
-    setAttendanceRecords(prev => {
+    setAttendanceRecords((prev: Record<string, AttendanceState>) => {
       const current = prev[studentId] || { days: {}, remarks: '' };
       const status = current.days[day];
       const nextStatus: AttendanceStatus = status === undefined ? 'x' : status === 'x' ? 'T' : status === 'T' ? '' : 'x';
@@ -636,7 +636,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
       return { ...prev, [studentId]: { ...current, days: newDays } };
     });
   };
-  const handleAttendanceRemarkChange = (id: string, val: string) => setAttendanceRecords(p => ({ ...p, [id]: { ...(p[id] || { days: {}, remarks: '' }), remarks: val } }));
+  const handleAttendanceRemarkChange = (id: string, val: string) => setAttendanceRecords((p: Record<string, AttendanceState>) => ({ ...p, [id]: { ...(p[id] || { days: {}, remarks: '' }), remarks: val } }));
   const saveAttendance = async () => {
     setSavingAttendance(true);
     try {
@@ -659,7 +659,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   const saveSf5Data = async () => {
     setSavingSf5(true);
     try {
-      const upserts = Object.values(academicRecords).map(r => ({...r, student_id: r.student_id}));
+      const upserts = Object.values(academicRecords).map((r: AcademicRecord) => ({...r, student_id: r.student_id}));
       if(upserts.length > 0) {
         const { error } = await supabase.from('student_academic_records').upsert(upserts, { onConflict: 'student_id' });
         if(error) throw error;
@@ -907,7 +907,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
         }
 
         // 2. Save Scores
-        const scorePayload = Object.values(crScores).map(sc => {
+        const scorePayload = Object.values(crScores).map((sc: ClassRecordScore) => {
            // Ensure grades are calculated before save
            const computed = calculateGrade(sc, crMeta!);
            return {
@@ -1376,12 +1376,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                  <tr>
                                     <td className="border border-slate-400 p-1 font-bold text-left pl-2">Days Present</td>
                                     {[...Array(12)].map((_,i) => <td key={i} className="border border-slate-400 p-1">{sf9Attendance[String(i+1).padStart(2,'0')]?.present || 0}</td>)}
-                                    <td className="border border-slate-400 p-1 font-bold">{Object.values(sf9Attendance).reduce((acc, curr) => acc + curr.present, 0)}</td>
+                                    <td className="border border-slate-400 p-1 font-bold">{Object.values(sf9Attendance).reduce((acc, curr: any) => acc + curr.present, 0)}</td>
                                  </tr>
                                  <tr>
                                     <td className="border border-slate-400 p-1 font-bold text-left pl-2">Days Absent</td>
                                     {[...Array(12)].map((_,i) => <td key={i} className="border border-slate-400 p-1">{sf9Attendance[String(i+1).padStart(2,'0')]?.absent || 0}</td>)}
-                                    <td className="border border-slate-400 p-1 font-bold">{Object.values(sf9Attendance).reduce((acc, curr) => acc + curr.absent, 0)}</td>
+                                    <td className="border border-slate-400 p-1 font-bold">{Object.values(sf9Attendance).reduce((acc, curr: any) => acc + curr.absent, 0)}</td>
                                  </tr>
                               </tbody>
                            </table>
@@ -1602,7 +1602,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                       />
                                    </td>
                                 ))}
-                                <td className="border-r border-slate-300 text-center bg-teal-100 font-bold">{Object.values(crMeta.hps_ww).reduce((a,b)=>a+(b||0),0)}</td>
+                                <td className="border-r border-slate-300 text-center bg-teal-100 font-bold">{Object.values(crMeta.hps_ww).reduce((a: number,b: number)=>a+(b||0),0)}</td>
                                 <td className="border-r border-slate-300 bg-teal-100 text-center text-xs text-slate-500">100%</td>
                                 <td className="border-r border-slate-300 bg-teal-100 text-center font-bold">{crMeta.weight_ww}%</td>
                                 {/* PT HPS */}
@@ -1614,7 +1614,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                       />
                                    </td>
                                 ))}
-                                <td className="border-r border-slate-300 text-center bg-yellow-100 font-bold">{Object.values(crMeta.hps_pt).reduce((a,b)=>a+(b||0),0)}</td>
+                                <td className="border-r border-slate-300 text-center bg-yellow-100 font-bold">{Object.values(crMeta.hps_pt).reduce((a: number,b: number)=>a+(b||0),0)}</td>
                                 <td className="border-r border-slate-300 bg-yellow-100 text-center text-xs text-slate-500">100%</td>
                                 <td className="border-r border-slate-300 bg-yellow-100 text-center font-bold">{crMeta.weight_pt}%</td>
                                 {/* QA HPS */}
@@ -1624,7 +1624,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                       onChange={e => handleHpsChange('hps_qa', '1', e.target.value)}
                                    />
                                 </td>
-                                <td className="border-r border-slate-300 text-center bg-green-100 font-bold">{Object.values(crMeta.hps_qa).reduce((a,b)=>a+(b||0),0)}</td>
+                                <td className="border-r border-slate-300 text-center bg-green-100 font-bold">{Object.values(crMeta.hps_qa).reduce((a: number,b: number)=>a+(b||0),0)}</td>
                                 <td className="border-r border-slate-300 bg-green-100 text-center text-xs text-slate-500">100%</td>
                                 <td className="border-r border-slate-300 bg-green-100 text-center font-bold">{crMeta.weight_qa}%</td>
                                 <td className="bg-slate-200"></td>
@@ -1634,64 +1634,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                           <tbody>
                              <tr className="bg-slate-50 border-b"><td colSpan={40} className="p-2 font-bold sticky left-0 bg-slate-50 z-10">MALE</td></tr>
                              {students.filter(s=>s.sex==='M').map((s, idx) => {
-                                const grades = calculateGrade(crScores[s.id!], crMeta);
-                                return (
-                                <tr key={s.id} className="border-b border-slate-200 hover:bg-slate-50" data-student-id={s.id}>
-                                   <td className="p-1 border-r border-slate-200 px-2 truncate sticky left-0 bg-white hover:bg-slate-50 z-10 font-medium">{idx+1}. {s.last_name}, {s.first_name}</td>
-                                   {/* WW Scores */}
-                                   {[...Array(10)].map((_, i) => (
-                                      <td key={`ww-${i}`} className="border-r border-slate-200 p-0 relative h-8 w-10">
-                                         <input type="number" className="w-full h-full text-center outline-none focus:bg-teal-100 bg-transparent [-moz-appearance:_textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none" 
-                                            value={crScores[s.id!]?.scores_ww[String(i+1)]||''} 
-                                            onChange={e=>handleCrScoreChange(s.id!,'scores_ww',String(i+1),e.target.value)}
-                                            onKeyDown={e => handleKeyDown(e, s.id!, 'scores_ww', String(i+1))}
-                                            onPaste={e => handlePaste(e, s.id!, 'scores_ww', i+1)}
-                                            data-col={`scores_ww-${i+1}`}
-                                         />
-                                      </td>
-                                   ))}
-                                   <td className="border-r border-slate-200 text-center bg-teal-50 font-bold text-xs">{grades.ww.total}</td>
-                                   <td className="border-r border-slate-200 text-center bg-teal-50 text-xs text-slate-500">{grades.ww.ps.toFixed(0)}</td>
-                                   <td className="border-r border-slate-200 text-center bg-teal-50 font-bold text-teal-800 text-xs">{grades.ww.ws.toFixed(2)}</td>
-
-                                   {/* PT Scores */}
-                                   {[...Array(10)].map((_, i) => (
-                                      <td key={`pt-${i}`} className="border-r border-slate-200 p-0 relative h-8 w-10">
-                                         <input type="number" className="w-full h-full text-center outline-none focus:bg-yellow-100 bg-transparent [-moz-appearance:_textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none" 
-                                            value={crScores[s.id!]?.scores_pt[String(i+1)]||''} 
-                                            onChange={e=>handleCrScoreChange(s.id!,'scores_pt',String(i+1),e.target.value)}
-                                            onKeyDown={e => handleKeyDown(e, s.id!, 'scores_pt', String(i+1))}
-                                            onPaste={e => handlePaste(e, s.id!, 'scores_pt', i+1)}
-                                            data-col={`scores_pt-${i+1}`}
-                                         />
-                                      </td>
-                                   ))}
-                                   <td className="border-r border-slate-200 text-center bg-yellow-50 font-bold text-xs">{grades.pt.total}</td>
-                                   <td className="border-r border-slate-200 text-center bg-yellow-50 text-xs text-slate-500">{grades.pt.ps.toFixed(0)}</td>
-                                   <td className="border-r border-slate-200 text-center bg-yellow-50 font-bold text-yellow-800 text-xs">{grades.pt.ws.toFixed(2)}</td>
-
-                                   {/* QA Scores */}
-                                   <td className="border-r border-slate-200 p-0 relative h-8 w-12">
-                                      <input type="number" className="w-full h-full text-center outline-none focus:bg-green-100 bg-transparent [-moz-appearance:_textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none" 
-                                         value={crScores[s.id!]?.scores_qa['1']||''} 
-                                         onChange={e=>handleCrScoreChange(s.id!,'scores_qa','1',e.target.value)} 
-                                         onKeyDown={e => handleKeyDown(e, s.id!, 'scores_qa', '1')}
-                                         onPaste={e => handlePaste(e, s.id!, 'scores_qa', 1)}
-                                         data-col={`scores_qa-1`}
-                                      />
-                                   </td>
-                                   <td className="border-r border-slate-200 text-center bg-green-50 font-bold text-xs">{grades.qa.total}</td>
-                                   <td className="border-r border-slate-200 text-center bg-green-50 text-xs text-slate-500">{grades.qa.ps.toFixed(0)}</td>
-                                   <td className="border-r border-slate-200 text-center bg-green-50 font-bold text-green-800 text-xs">{grades.qa.ws.toFixed(2)}</td>
-                                   
-                                   {/* FINAL GRADES */}
-                                   <td className="border-r border-slate-200 text-center bg-slate-100 text-xs">{grades.initialGrade.toFixed(2)}</td>
-                                   <td className="text-center font-bold bg-green-100 text-green-900 border-r border-slate-300">{grades.quarterlyGrade}</td>
-                                </tr>
-                             )})}
-
-                             <tr className="bg-slate-50 border-b"><td colSpan={40} className="p-2 font-bold sticky left-0 bg-slate-50 z-10">FEMALE</td></tr>
-                             {students.filter(s=>s.sex==='F').map((s, idx) => {
                                 const grades = calculateGrade(crScores[s.id!], crMeta);
                                 return (
                                 <tr key={s.id} className="border-b border-slate-200 hover:bg-slate-50" data-student-id={s.id}>
