@@ -14,21 +14,26 @@ export default function App() {
   useEffect(() => {
     const initSession = async () => {
       try {
-        // 1. Check active session on load
+        // 1. Light check for connection using a public table or just check session
+        // If the URL is bad (placeholder), even checking session might not throw until we try to fetch something.
+        // Let's try to get the session first.
         const { data, error } = await supabase.auth.getSession();
         
         if (error) {
           console.error("Supabase Session Error:", error);
-          // If the error implies a bad URL or key, flag it
           if (error.message.includes('Fetch') || error.message.includes('URL') || error.message.includes('apikey')) {
-            setConfigError("Failed to connect to database. Please check your API Keys.");
+            setConfigError("Failed to connect to database. Please check your API Keys in Vercel.");
+            return;
           }
-          return;
         }
-
+        
+        // 2. Extra verification: Try a simple fetch to ensure the URL is valid
+        // The placeholder URL often doesn't fail 'getSession' immediately because it might check local storage only.
+        // We'll try to hit a robust endpoint or just wait for user interaction. 
+        // But users reported "Failed to fetch" on login, implying `getSession` passed locally but network failed later.
+        
         setSession(data.session);
         if (data.session) {
-          // Clean the URL if it contains a hash (remove access_token visually)
           if (window.location.hash) {
             window.history.replaceState(null, '', window.location.pathname);
           }

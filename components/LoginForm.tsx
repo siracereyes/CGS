@@ -50,8 +50,20 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onNavigateToRegister }) =>
           .rpc('get_email_by_username', { username_input: cleanIdentifier });
 
         if (lookupError) {
-          console.error("Lookup Error:", lookupError);
-          throw new Error('System error: Unable to verify username.');
+          console.error("Lookup Error:", JSON.stringify(lookupError));
+          
+          // Check for Network Error (Config issue)
+          if (lookupError.message && lookupError.message.includes('Failed to fetch')) {
+             throw new Error("Connection failed. Please check your internet or database configuration.");
+          }
+          
+          // Check if function is missing (Code 42883) or generic error
+          // If the backend function doesn't exist, we cannot support username login.
+          if (lookupError.code === '42883' || (lookupError.message && lookupError.message.includes('function'))) {
+             throw new Error('Username login is not configured on this server. Please login with your Email Address.');
+          }
+
+          throw new Error('Unable to verify username. Please try logging in with your Email Address.');
         }
 
         if (!emailData) {
@@ -71,10 +83,17 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onNavigateToRegister }) =>
       });
 
       if (authError) {
+        console.error("Auth Error:", JSON.stringify(authError));
+        
         if (authError.message.includes("Email not confirmed")) {
           setNeedsConfirmation(true);
           throw new Error("Email not confirmed.");
         }
+        
+        if (authError.message.includes("Failed to fetch")) {
+           throw new Error("Connection failed. Please check your internet or API keys.");
+        }
+        
         throw new Error('Invalid password or credentials. Please try again.');
       }
 
@@ -92,7 +111,17 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onNavigateToRegister }) =>
       
     } catch (err: any) {
       console.error("Login Error details:", err);
-      const message = err?.message || (typeof err === 'string' ? err : "An unexpected error occurred during login.");
+      let message = "An unexpected error occurred during login.";
+      
+      if (err instanceof Error) {
+        message = err.message;
+      } else if (typeof err === 'string') {
+        message = err;
+      } else if (err && typeof err === 'object') {
+        // Safe extraction
+        message = err.message || err.error_description || JSON.stringify(err);
+      }
+      
       setErrorMsg(message);
     } finally {
       setIsLoading(false);
