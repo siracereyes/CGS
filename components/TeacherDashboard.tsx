@@ -5,7 +5,8 @@ import { Button } from './ui/Button';
 import { 
   Users, BookOpen, Save, Download, Search, Menu, 
   FileSpreadsheet, Upload, Plus, X, Calendar, AlertCircle, Copy, RefreshCw, Library, Trash2,
-  BarChart, PieChart, GraduationCap, Printer, Briefcase, LayoutGrid, Calculator, Edit2, Check, Clock, Settings, UserCheck, Pencil
+  BarChart, PieChart, GraduationCap, Printer, Briefcase, LayoutGrid, Calculator, Edit2, Check, Clock, Settings, UserCheck, Pencil,
+  ShieldCheck, LayoutDashboard
 } from 'lucide-react';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
@@ -171,6 +172,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
     const dayOfWeek = date.getDay(); // 0 = Sun, 6 = Sat
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     return { isWeekend, isInvalid };
+  };
+
+  // Helper to safely get teacher name regardless of case (snake vs camel)
+  const getTeacherName = (t: any) => {
+    if (!t) return 'Unknown';
+    const first = t.first_name || t.firstName || '';
+    const last = t.last_name || t.lastName || '';
+    return `${last}, ${first}`;
   };
 
   // --- Initial Checks ---
@@ -500,12 +509,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
     setLoading(true);
     try {
       // 1. Fetch Sections with Advisers
-      const { data: secData, error: secError } = await supabase.from('sections').select('*, adviser:adviser_id(first_name, last_name)').order('grade_level');
+      // Note: Join syntax depends on foreign key name. Assuming 'profiles' table exists.
+      // If names are not showing, it might be due to RLS or FK missing.
+      const { data: secData, error: secError } = await supabase
+        .from('sections')
+        .select('*, adviser:adviser_id(first_name, last_name, firstName, lastName)') 
+        .order('grade_level');
+        
       if (secError) throw secError;
       setAllSections(secData || []);
 
       // 2. Fetch Teachers
-      const { data: profData, error: profError } = await supabase.from('profiles').select('*'); 
+      // Explicitly select columns to avoid issues with large objects
+      const { data: profData, error: profError } = await supabase
+         .from('profiles')
+         .select('*');
+      
       if (profError) {
          console.warn("Could not fetch profiles", profError);
          setAllTeachers([]); 
@@ -1121,16 +1140,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   return (
     <div className="flex h-[calc(100vh-5rem)] bg-slate-50 overflow-hidden print:bg-white print:h-auto">
       <aside className={`bg-white border-r border-slate-200 transition-all z-20 print:hidden ${sidebarOpen ? 'w-64' : 'w-20'} flex flex-col`}>
-        <div className="p-4 border-b border-slate-100 flex justify-between items-center">
-           {sidebarOpen && <span className="font-bold text-green-900">Dashboard</span>}
-           <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1 hover:bg-green-50 rounded text-slate-500"><Menu/></button>
+        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+           {sidebarOpen && <span className="font-bold text-slate-700 flex items-center gap-2"><LayoutDashboard className="h-4 w-4"/> Dashboard</span>}
+           <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1 hover:bg-slate-200 rounded text-slate-500"><Menu/></button>
         </div>
         <div className="flex-1 overflow-y-auto py-4">
            
            {/* TEACHING SECTION: Visible to Everyone EXCEPT Admins */}
            {showTeachingTools && (
              <>
-               <div className="px-4 pb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mt-4 first:mt-0">{sidebarOpen && 'Teaching'}</div>
+               {sidebarOpen ? (
+                 <div className="px-4 py-2 mt-2 mb-1 bg-slate-100 border-y border-slate-200 text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center">
+                   <Briefcase className="w-3 h-3 mr-2" /> Teaching Tools
+                 </div>
+               ) : (
+                 <div className="my-2 border-b border-slate-200" />
+               )}
+               
                <button onClick={() => setActiveView('class_record')} className={`w-full flex items-center px-4 py-3 text-sm font-medium border-l-4 ${activeView === 'class_record' ? 'bg-green-50 text-green-900 border-green-600' : 'border-transparent text-slate-600 hover:bg-green-50'}`}>
                   <Calculator className="h-5 w-5 mr-3"/>{sidebarOpen && 'Class Record'}
                </button>
@@ -1140,7 +1166,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
            {/* ADVISERY SECTION: Visible ONLY to Assigned Advisers */}
            {showAdviserTools && (
              <>
-                <div className="px-4 pb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mt-4">{sidebarOpen && 'Advisery'}</div>
+                {sidebarOpen ? (
+                  <div className="px-4 py-2 mt-4 mb-1 bg-slate-100 border-y border-slate-200 text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center">
+                    <UserCheck className="w-3 h-3 mr-2" /> Advisory Tools
+                  </div>
+                ) : (
+                  <div className="my-2 border-b border-slate-200" />
+                )}
+                
                 {['sf1', 'sf2', 'sf3', 'sf5', 'sf6'].map(f => (
                   <button key={f} onClick={() => setActiveView(f as any)} className={`w-full flex items-center px-4 py-3 text-sm font-medium border-l-4 ${activeView === f ? 'bg-green-50 text-green-900 border-green-600' : 'border-transparent text-slate-600 hover:bg-green-50'}`}>
                       {f==='sf1' ? <FileSpreadsheet className="h-5 w-5 mr-3"/> : f==='sf2' ? <Calendar className="h-5 w-5 mr-3"/> : f==='sf3' ? <Library className="h-5 w-5 mr-3"/> : <BarChart className="h-5 w-5 mr-3"/>}
@@ -1156,7 +1189,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
            {/* ADMINISTRATION SECTION: Visible to Admins and Head Teachers */}
            {showAdminTools && (
               <>
-                 <div className="mt-4 px-4 pb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">{sidebarOpen && 'Administration'}</div>
+                 {sidebarOpen ? (
+                   <div className="px-4 py-2 mt-4 mb-1 bg-slate-100 border-y border-slate-200 text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center">
+                     <ShieldCheck className="w-3 h-3 mr-2" /> Administration
+                   </div>
+                 ) : (
+                   <div className="my-2 border-b border-slate-200" />
+                 )}
+                 
                  <button onClick={() => setActiveView('admin_sections')} className={`w-full flex items-center px-4 py-3 text-sm font-medium border-l-4 ${activeView === 'admin_sections' ? 'bg-green-50 text-green-900 border-green-600' : 'border-transparent text-slate-600 hover:bg-green-50'}`}>
                     <Settings className="h-5 w-5 mr-3"/>{sidebarOpen && 'Admin Panel'}
                  </button>
@@ -1518,7 +1558,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                             >
                                                <option value="">-- Assign Adviser --</option>
                                                {availableTeachers.map(t => (
-                                                  <option key={t.id} value={t.id}>{t.last_name}, {t.first_name}</option>
+                                                  <option key={t.id} value={t.id}>{getTeacherName(t)}</option>
                                                ))}
                                             </select>
                                          </div>
@@ -1575,7 +1615,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                                             >
                                                <option value="">-- No Teacher Assigned --</option>
                                                {allTeachers.map(t => (
-                                                  <option key={t.id} value={t.id}>{t.last_name}, {t.first_name}</option>
+                                                  <option key={t.id} value={t.id}>{getTeacherName(t)}</option>
                                                ))}
                                             </select>
                                          </td>
@@ -1609,7 +1649,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                              <tbody className="divide-y divide-slate-100">
                                 {allTeachers.map(t => (
                                    <tr key={t.id} className="hover:bg-slate-50">
-                                      <td className="p-3 font-medium">{t.last_name}, {t.first_name}</td>
+                                      <td className="p-3 font-medium">{getTeacherName(t)}</td>
                                       <td className="p-3">{t.username || 'N/A'}</td>
                                       <td className="p-3">
                                          <span className={`px-2 py-1 rounded-full text-xs font-bold ${

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { LoginForm } from './components/LoginForm';
 import { RegistrationForm } from './components/RegistrationForm';
 import { TeacherDashboard } from './components/TeacherDashboard';
-import { LogOut, AlertTriangle } from 'lucide-react';
+import { LogOut, AlertTriangle, UserCircle } from 'lucide-react';
 import { supabase } from './lib/supabaseClient';
 import { Button } from './components/ui/Button';
 
@@ -58,6 +58,18 @@ export default function App() {
     await supabase.auth.signOut();
   };
 
+  // Helper to get user display info
+  const getUserDisplayName = () => {
+    if (!session?.user?.user_metadata) return 'User';
+    const { firstName, lastName, email } = session.user.user_metadata;
+    if (firstName && lastName) return `${firstName} ${lastName}`;
+    return email || session.user.email;
+  };
+
+  const getUserRole = () => {
+    return session?.user?.user_metadata?.role || 'Guest';
+  };
+
   // Render Configuration Error Screen if critical failure
   if (configError) {
     return (
@@ -108,10 +120,19 @@ export default function App() {
           </div>
           <div className="flex items-center gap-4">
             {session && (
-              <Button variant="ghost" className="text-white hover:text-white hover:bg-white/10" onClick={handleSignOut}>
-                <LogOut className="h-4 w-4 mr-2" />
-                Sign Out
-              </Button>
+              <div className="flex items-center gap-4 bg-green-900/50 py-1.5 px-4 rounded-full border border-green-700/50">
+                <div className="text-right hidden sm:block">
+                  <div className="text-sm font-bold leading-none">{getUserDisplayName()}</div>
+                  <div className="text-xs text-yellow-200 font-medium">{getUserRole()}</div>
+                </div>
+                <div className="h-8 w-8 bg-green-700 rounded-full flex items-center justify-center text-xs font-bold border-2 border-green-600">
+                  {getUserDisplayName().charAt(0)}
+                </div>
+                <div className="h-6 w-px bg-green-700 mx-1"></div>
+                <Button variant="ghost" className="text-white hover:text-white hover:bg-white/10 p-1 h-auto" onClick={handleSignOut} title="Sign Out">
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </div>
             )}
           </div>
         </div>
