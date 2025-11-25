@@ -65,8 +65,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   const isHeadTeacher = user_metadata.role === Role.HEAD_TEACHER;
   const isAdmin = user_metadata.role === Role.ADMIN;
   
-  // View State
-  const [activeView, setActiveView] = useState<'grading' | 'sf1' | 'sf2' | 'sf3' | 'sf5' | 'sf6' | 'sf9' | 'admin_sections' | 'class_record'>('class_record');
+  // View State - Initialize based on Role
+  const [activeView, setActiveView] = useState<'grading' | 'sf1' | 'sf2' | 'sf3' | 'sf5' | 'sf6' | 'sf9' | 'admin_sections' | 'class_record'>(
+     isAdmin ? 'admin_sections' : 'class_record'
+  );
   const [activeGrade, setActiveGrade] = useState<string>(user_metadata.mainGradeLevel || '');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   
@@ -74,8 +76,20 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   const [adviserSection, setAdviserSection] = useState<Section | null>(null);
   const [checkingAdviser, setCheckingAdviser] = useState(true);
   
-  // Derived Roles
+  // Derived Adviser Status
   const isAdviser = !!adviserSection; 
+
+  // Tool Visibility Logic
+  const showTeachingTools = !isAdmin; // Teachers, Advisers, Head Teachers see Class Record. Admin does NOT.
+  const showAdviserTools = isAdviser; // Only explicit Advisers see School Forms.
+  const showAdminTools = isAdmin || isHeadTeacher; // Admins and Head Teachers see Admin Tools.
+
+  // Redirect if current view is not allowed
+  useEffect(() => {
+     if (isAdmin && activeView === 'class_record') {
+        setActiveView('admin_sections');
+     }
+  }, [isAdmin, activeView]);
 
   // Data State
   const [students, setStudents] = useState<Student[]>([]);
@@ -1112,26 +1126,39 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1 hover:bg-green-50 rounded text-slate-500"><Menu/></button>
         </div>
         <div className="flex-1 overflow-y-auto py-4">
-           {/* Navigation Items */}
-           <button onClick={() => setActiveView('class_record')} className={`w-full flex items-center px-4 py-3 text-sm font-medium border-l-4 ${activeView === 'class_record' ? 'bg-green-50 text-green-900 border-green-600' : 'border-transparent text-slate-600 hover:bg-green-50'}`}>
-              <Calculator className="h-5 w-5 mr-3"/>{sidebarOpen && 'Class Record'}
-           </button>
-           {['sf1', 'sf2', 'sf3', 'sf5', 'sf6'].map(f => (
-             <button key={f} onClick={() => setActiveView(f as any)} className={`w-full flex items-center px-4 py-3 text-sm font-medium border-l-4 ${activeView === f ? 'bg-green-50 text-green-900 border-green-600' : 'border-transparent text-slate-600 hover:bg-green-50'}`}>
-                {f==='sf1' ? <FileSpreadsheet className="h-5 w-5 mr-3"/> : f==='sf2' ? <Calendar className="h-5 w-5 mr-3"/> : f==='sf3' ? <Library className="h-5 w-5 mr-3"/> : <BarChart className="h-5 w-5 mr-3"/>}
-                {sidebarOpen && `School Form ${f.replace('sf','')}`}
-             </button>
-           ))}
-           <button onClick={() => setActiveView('sf9')} className={`w-full flex items-center px-4 py-3 text-sm font-medium border-l-4 ${activeView === 'sf9' ? 'bg-green-50 text-green-900 border-green-600' : 'border-transparent text-slate-600 hover:bg-green-50'}`}>
-              <GraduationCap className="h-5 w-5 mr-3"/>{sidebarOpen && 'SF9 (Report Card)'}
-           </button>
            
-           {/* Admin & Head Teacher Section */}
-           {(isAdmin || isHeadTeacher) && (
+           {/* TEACHING SECTION: Visible to Everyone EXCEPT Admins */}
+           {showTeachingTools && (
+             <>
+               <div className="px-4 pb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mt-4 first:mt-0">{sidebarOpen && 'Teaching'}</div>
+               <button onClick={() => setActiveView('class_record')} className={`w-full flex items-center px-4 py-3 text-sm font-medium border-l-4 ${activeView === 'class_record' ? 'bg-green-50 text-green-900 border-green-600' : 'border-transparent text-slate-600 hover:bg-green-50'}`}>
+                  <Calculator className="h-5 w-5 mr-3"/>{sidebarOpen && 'Class Record'}
+               </button>
+             </>
+           )}
+
+           {/* ADVISERY SECTION: Visible ONLY to Assigned Advisers */}
+           {showAdviserTools && (
+             <>
+                <div className="px-4 pb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mt-4">{sidebarOpen && 'Advisery'}</div>
+                {['sf1', 'sf2', 'sf3', 'sf5', 'sf6'].map(f => (
+                  <button key={f} onClick={() => setActiveView(f as any)} className={`w-full flex items-center px-4 py-3 text-sm font-medium border-l-4 ${activeView === f ? 'bg-green-50 text-green-900 border-green-600' : 'border-transparent text-slate-600 hover:bg-green-50'}`}>
+                      {f==='sf1' ? <FileSpreadsheet className="h-5 w-5 mr-3"/> : f==='sf2' ? <Calendar className="h-5 w-5 mr-3"/> : f==='sf3' ? <Library className="h-5 w-5 mr-3"/> : <BarChart className="h-5 w-5 mr-3"/>}
+                      {sidebarOpen && `School Form ${f.replace('sf','')}`}
+                  </button>
+                ))}
+                <button onClick={() => setActiveView('sf9')} className={`w-full flex items-center px-4 py-3 text-sm font-medium border-l-4 ${activeView === 'sf9' ? 'bg-green-50 text-green-900 border-green-600' : 'border-transparent text-slate-600 hover:bg-green-50'}`}>
+                    <GraduationCap className="h-5 w-5 mr-3"/>{sidebarOpen && 'SF9 (Report Card)'}
+                </button>
+             </>
+           )}
+           
+           {/* ADMINISTRATION SECTION: Visible to Admins and Head Teachers */}
+           {showAdminTools && (
               <>
                  <div className="mt-4 px-4 pb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">{sidebarOpen && 'Administration'}</div>
                  <button onClick={() => setActiveView('admin_sections')} className={`w-full flex items-center px-4 py-3 text-sm font-medium border-l-4 ${activeView === 'admin_sections' ? 'bg-green-50 text-green-900 border-green-600' : 'border-transparent text-slate-600 hover:bg-green-50'}`}>
-                    <Settings className="h-5 w-5 mr-3"/>{sidebarOpen && 'Manage Sections'}
+                    <Settings className="h-5 w-5 mr-3"/>{sidebarOpen && 'Admin Panel'}
                  </button>
               </>
            )}
