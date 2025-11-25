@@ -5,7 +5,7 @@ import {
   Users, BookOpen, Save, Download, Search, Menu, 
   FileSpreadsheet, Upload, Plus, X, Calendar, AlertCircle, Copy, RefreshCw, Library, Trash2,
   BarChart, PieChart, GraduationCap, Printer, Briefcase, LayoutGrid, Calculator, Edit2, Check, Clock, Settings, UserCheck, Pencil,
-  ShieldCheck, LayoutDashboard, LogOut, ChevronDown, User, CheckSquare, Square, Key, Mail, Lock, Database
+  ShieldCheck, LayoutDashboard, LogOut, ChevronDown, User, CheckSquare, Square, Key, Mail, Lock, Database, ToggleLeft, ToggleRight
 } from 'lucide-react';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
@@ -37,7 +37,8 @@ create table if not exists public.profiles (
   has_multiple_grades boolean default false,
   additional_grades text[] default '{}',
   additional_subjects text[] default '{}',
-  created_at timestamp with time zone default timezone('utc'::text, now())
+  created_at timestamp with time zone default timezone('utc'::text, now()),
+  constraint profiles_username_key unique (username)
 );
 alter table public.profiles enable row level security;
 create policy "Public profiles are viewable by everyone" on public.profiles for select using (true);
@@ -199,7 +200,17 @@ create table if not exists public.class_record_scores (
 alter table public.class_record_scores enable row level security;
 create policy "Enable all access" on public.class_record_scores for all using (auth.role() = 'authenticated');
 
--- 12. RPC for Username Login
+-- 12. SYSTEM SETTINGS
+create table if not exists public.system_settings (
+  key text primary key,
+  value jsonb default '{}'::jsonb,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+alter table public.system_settings enable row level security;
+create policy "Settings viewable by everyone" on public.system_settings for select using (true);
+create policy "Admins can update settings" on public.system_settings for all using (true);
+
+-- 13. USERNAME LOOKUP FUNCTION
 create or replace function get_email_by_username(username_input text)
 returns text
 language plpgsql
@@ -214,6 +225,35 @@ begin
   );
 end;
 $$;
+
+-- 14. PROFILE TRIGGER (Handles Auth -> Public Profile Sync)
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.profiles (id, email, first_name, last_name, username, role, main_subject, main_grade_level, has_multiple_grades)
+  values (
+    new.id,
+    new.email,
+    new.raw_user_meta_data->>'firstName',
+    new.raw_user_meta_data->>'lastName',
+    new.raw_user_meta_data->>'username',
+    new.raw_user_meta_data->>'role',
+    new.raw_user_meta_data->>'mainSubject',
+    new.raw_user_meta_data->>'mainGradeLevel',
+    (new.raw_user_meta_data->>'hasMultipleGrades')::boolean
+  )
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
 `;
 
 // Local type for managing combined attendance state
@@ -240,6 +280,15 @@ type Sf6GradeLevelData = {
     verySatisfactory: Sf6Counts;
     outstanding: Sf6Counts;
   };
+};
+
+type ClassAssignment = {
+  uniqueId: string;
+  grade_level: string;
+  section_name: string;
+  subject: string;
+  section_id: string;
+  source: 'Adviser' | 'Assignment';
 };
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) => {
@@ -335,9 +384,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   const [sf9Error, setSf9Error] = useState<string | null>(null);
 
   // Admin & Head Teacher State
-  const [adminTab, setAdminTab] = useState<'sections' | 'assignments' | 'users'>('sections');
+  const [adminTab, setAdminTab] = useState<'sections' | 'assignments' | 'users' | 'settings'>('sections');
   const [allSections, setAllSections] = useState<Section[]>([]);
   const [allTeachers, setAllTeachers] = useState<SimpleTeacherProfile[]>([]);
+  // Admin Settings
+  const [allowAdminRegistration, setAllowAdminRegistration] = useState(true);
   
   // Admin - Manage Sections
   const [newSection, setNewSection] = useState({ grade_level: '', section_name: '' });
@@ -349,9 +400,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
   const [currentAssignments, setCurrentAssignments] = useState<Record<string, string>>({}); // Subject -> TeacherID
   
   // CLASS RECORD State
-  const [mySections, setMySections] = useState<Section[]>([]);
-  const [mySubjectAssignments, setMySubjectAssignments] = useState<{section_id: string, subject: string}[]>([]); // Store subject assignments
-  const [availableSubjects, setAvailableSubjects] = useState<string[]>([]); // Filtered subjects for dropdown
+  const [myClasses, setMyClasses] = useState<ClassAssignment[]>([]);
   const [crSelection, setCrSelection] = useState({ grade: '', section: '', subject: '', quarter: 1 });
   const [crMeta, setCrMeta] = useState<ClassRecordMeta | null>(null);
   const [crScores, setCrScores] = useState<Record<string, ClassRecordScore>>({}); 
@@ -457,103 +506,114 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
     }
   };
 
-  const fetchMySections = async () => {
+  const fetchMyClasses = async () => {
     try {
-      // 1. Get sections where I am the adviser
-      const { data: adviserData } = await supabase.from('sections').select('*').eq('adviser_id', user.id);
+      const classes: ClassAssignment[] = [];
       
-      // 2. Get sections where I am a subject teacher (and fetch the subject!)
+      // 1. Get assignments FIRST to check for overrides
       const { data: assignmentData } = await supabase.from('section_assignments')
-        .select('subject, section_id, sections(id, grade_level, section_name)') // Join to get section details
+        .select('subject, section_id, sections(id, grade_level, section_name)')
         .eq('teacher_id', user.id);
         
-      const sectionsFromAssignments = assignmentData?.map((a:any) => a.sections) || [];
-      const sectionsFromAdviser = adviserData || [];
-      
-      // Store specific subject assignments
-      const subjectAssignments = assignmentData?.map((a:any) => ({
-        section_id: a.section_id,
-        subject: a.subject
-      })) || [];
-      setMySubjectAssignments(subjectAssignments);
-
-      // Merge and dedup based on ID for the Section Dropdown
-      const all = [...sectionsFromAdviser, ...sectionsFromAssignments].filter(Boolean);
-      const uniqueMap = new Map();
-      all.forEach(s => uniqueMap.set(s.id, s));
-      const unique = Array.from(uniqueMap.values());
-      
-      setMySections(unique);
-      
-      // If no CR selection yet, pick first
-      if (!crSelection.section && unique.length > 0) {
-         setCrSelection(prev => ({...prev, grade: unique[0].grade_level, section: unique[0].section_name}));
+      if (assignmentData) {
+         assignmentData.forEach((assign: any) => {
+            if (assign.sections) {
+               classes.push({
+                  uniqueId: `${assign.section_id}-${assign.subject}`,
+                  grade_level: assign.sections.grade_level,
+                  section_name: assign.sections.section_name,
+                  section_id: assign.section_id,
+                  subject: assign.subject,
+                  source: 'Assignment'
+               });
+            }
+         });
       }
+
+      // 2. Get sections where I am the adviser
+      const { data: adviserData } = await supabase.from('sections').select('*').eq('adviser_id', user.id);
+      
+      if (adviserData) {
+         // We need to know which subjects in MY section are assigned to OTHERS
+         const sectionIds = adviserData.map((s:any) => s.id);
+         const { data: conflictData } = await supabase.from('section_assignments')
+            .select('section_id, subject')
+            .in('section_id', sectionIds);
+            
+         const conflicts: Record<string, string[]> = {}; // sectionId -> [subjects handled by others]
+         conflictData?.forEach((c:any) => {
+            if(!conflicts[c.section_id]) conflicts[c.section_id] = [];
+            conflicts[c.section_id].push(c.subject);
+         });
+
+         adviserData.forEach((sec: any) => {
+            const blockedSubjects = conflicts[sec.id] || [];
+            
+            // Add Main Subject (if not blocked)
+            if (userProfileForm.mainSubject && !blockedSubjects.includes(userProfileForm.mainSubject)) {
+               classes.push({
+                  uniqueId: `${sec.id}-${userProfileForm.mainSubject}`,
+                  grade_level: sec.grade_level,
+                  section_name: sec.section_name,
+                  section_id: sec.id,
+                  subject: userProfileForm.mainSubject,
+                  source: 'Adviser'
+               });
+            }
+            // Add Additional Subjects (if not blocked)
+            userProfileForm.additionalSubjects?.forEach(sub => {
+               if (!blockedSubjects.includes(sub)) {
+                  classes.push({
+                     uniqueId: `${sec.id}-${sub}`,
+                     grade_level: sec.grade_level,
+                     section_name: sec.section_name,
+                     section_id: sec.id,
+                     subject: sub,
+                     source: 'Adviser'
+                  });
+               }
+            });
+         });
+      }
+
+      // Deduplicate
+      const uniqueClasses = Array.from(new Map(classes.map(c => [c.uniqueId, c])).values());
+      
+      // Sort: Grade -> Section -> Subject
+      uniqueClasses.sort((a, b) => {
+         if (a.grade_level !== b.grade_level) return a.grade_level.localeCompare(b.grade_level);
+         if (a.section_name !== b.section_name) return a.section_name.localeCompare(b.section_name);
+         return a.subject.localeCompare(b.subject);
+      });
+
+      setMyClasses(uniqueClasses);
+      
+      // Auto-select first if nothing selected
+      if (!crSelection.section && uniqueClasses.length > 0) {
+         const first = uniqueClasses[0];
+         setCrSelection(prev => ({
+            ...prev, 
+            grade: first.grade_level, 
+            section: first.section_name, 
+            subject: first.subject
+         }));
+      }
+
     } catch (e) {
-      console.error("Error fetching my sections", e);
+      console.error("Error fetching my classes", e);
     }
   };
 
   useEffect(() => {
     syncUserProfile();
     checkAdviserStatus();
-    fetchMySections();
   }, [user.id]);
   
-  // Effect to filter Available Subjects based on Selected Section
+  // Re-fetch classes whenever profile (subjects) or adviser status changes
   useEffect(() => {
-    if (!crSelection.section || !crSelection.grade) {
-      setAvailableSubjects([]);
-      return;
-    }
+     fetchMyClasses();
+  }, [user.id, userProfileForm, adviserSection]);
 
-    // 1. Find the section object for the current selection to get its ID
-    const currentSectionObj = mySections.find(s => 
-      s.section_name === crSelection.section && s.grade_level === crSelection.grade
-    );
-
-    if (!currentSectionObj) {
-       setAvailableSubjects([]);
-       return;
-    }
-
-    const currentSectionId = currentSectionObj.id;
-
-    // 2. Get explicit assignments for this section
-    const assignedSubjects = mySubjectAssignments
-      .filter(a => a.section_id === currentSectionId)
-      .map(a => a.subject);
-
-    // 3. If I am the ADVISER, I should also be able to see my Main Subject AND Additional Subjects
-    if (adviserSection && adviserSection.id === currentSectionId) {
-       // Add Main Subject
-       if (userProfileForm.mainSubject && !assignedSubjects.includes(userProfileForm.mainSubject)) {
-          assignedSubjects.push(userProfileForm.mainSubject);
-       }
-       // Add Additional Subjects
-       if (userProfileForm.additionalSubjects && userProfileForm.additionalSubjects.length > 0) {
-          userProfileForm.additionalSubjects.forEach(s => {
-             if(!assignedSubjects.includes(s)) assignedSubjects.push(s);
-          });
-       }
-    }
-
-    // 4. Set available subjects
-    const uniqueSubjects = [...new Set(assignedSubjects)];
-    setAvailableSubjects(uniqueSubjects);
-
-    // 5. Auto-select logic
-    // If the currently selected subject is NOT in the allowed list, default to the first one
-    if (uniqueSubjects.length > 0) {
-       if (!crSelection.subject || !uniqueSubjects.includes(crSelection.subject)) {
-          setCrSelection(prev => ({ ...prev, subject: uniqueSubjects[0] }));
-       }
-    } else {
-       // No subjects allowed? Clear selection
-       setCrSelection(prev => ({ ...prev, subject: '' }));
-    }
-
-  }, [crSelection.section, crSelection.grade, mySections, mySubjectAssignments, adviserSection, userProfileForm]);
 
   // --- Data Fetching ---
   const fetchStudents = async () => {
@@ -767,8 +827,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
 
   const fetchAdminData = async () => {
     // We allow admin AND head teacher to fetch.
-    // Also, regular teachers might need this if we use it for some lookups, 
-    // but usually only admin/HT views trigger this.
     if (!isAdmin && !isHeadTeacher) return;
     
     setLoading(true);
@@ -782,7 +840,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
       const { data: profData, error: profError } = await supabase
          .from('profiles')
          .select('id, first_name, last_name, email, username, role, main_subject, main_grade_level, has_multiple_grades, additional_grades, additional_subjects')
-         .order('last_name'); // Order by name for easier lookup
+         .order('last_name'); 
       
       if (profError) {
          console.warn("Could not fetch profiles", profError);
@@ -790,6 +848,20 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
       } else {
          setAllTeachers(profData as any[]);
       }
+
+      // 3. Fetch System Settings (Admin Only)
+      if (isAdmin) {
+         const { data: settingsData } = await supabase
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'registration_config')
+            .maybeSingle();
+         
+         if (settingsData && settingsData.value) {
+            setAllowAdminRegistration(settingsData.value.allow_admin_role ?? true);
+         }
+      }
+
     } catch (e: any) {
       console.error("Admin Fetch Error", e);
     } finally {
@@ -860,7 +932,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
         
         if(error) {
            if (error.message.includes('does not exist')) {
-              // Trigger schema helper
               alert("Error: Database tables are missing. Please click the 'Database Schema' option in your profile menu to fix this.");
               setShowSchemaModal(true);
               throw error;
@@ -880,7 +951,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
            }
         });
         
-        // Update auth email if changed
         if (userProfileForm.email !== user.email) {
            const { error: authError } = await supabase.auth.updateUser({ email: userProfileForm.email });
            if(authError) alert("Profile details saved, but failed to update Login Email: " + authError.message);
@@ -890,7 +960,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
         }
         
         setShowProfileSettings(false);
-        // Refresh local sync
         syncUserProfile();
      } catch(e:any) {
         if (!e.message.includes('does not exist')) {
@@ -935,6 +1004,28 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
         alert(`Password reset email sent to ${email}`);
      } catch(e:any) {
         alert("Error sending reset email: " + e.message);
+     } finally {
+        setLoading(false);
+     }
+  };
+  
+  const handleToggleAdminRegistration = async (allowed: boolean) => {
+     if (!isAdmin) return;
+     setLoading(true);
+     try {
+        // Upsert setting
+        const { error } = await supabase
+           .from('system_settings')
+           .upsert({
+              key: 'registration_config',
+              value: { allow_admin_role: allowed }
+           }, { onConflict: 'key' });
+           
+        if (error) throw error;
+        setAllowAdminRegistration(allowed);
+        alert("System Setting Updated: " + (allowed ? "Admin/Head Teacher roles are now VISIBLE in registration." : "Admin/Head Teacher roles are now HIDDEN in registration."));
+     } catch(e:any) {
+        alert("Error updating setting: " + e.message);
      } finally {
         setLoading(false);
      }
@@ -1885,100 +1976,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                  })()}
               </div>
             )}
-            {activeView === 'sf9' && (
-               <div className="flex flex-col gap-6">
-                 {/* SF9 UI omitted for brevity, logic identical */}
-                 {/* ... Student Select ... */}
-                  <div className="bg-white p-4 rounded-xl border border-slate-200 print:hidden">
-                     <label className="block text-sm font-medium text-slate-700 mb-2">Select Student</label>
-                     <select className="w-full border border-slate-300 rounded-lg p-2" onChange={(e) => { const s = students.find(st => st.id === e.target.value); setSf9Student(s || null); }}>
-                        <option value="">-- Choose a Student --</option>
-                        {students.map(s => <option key={s.id} value={s.id}>{s.last_name}, {s.first_name}</option>)}
-                     </select>
-                  </div>
-                  {/* ... Report Card Body ... */}
-                  {sf9Student && (
-                     <div className="bg-white p-8 border border-slate-200 shadow-sm print:border-none print:shadow-none max-w-4xl mx-auto">
-                        <div className="text-center mb-8 border-b-2 border-green-800 pb-4">
-                           <h1 className="text-2xl font-bold font-serif text-green-900 uppercase">Ramon Magsaysay (CUBAO) High School</h1>
-                           <p className="text-sm">Quezon City, NCR</p>
-                           <h2 className="text-xl font-bold mt-4 uppercase">Learner's Progress Report Card</h2>
-                           <div className="mt-4 grid grid-cols-2 text-left text-sm">
-                              <div>Name: <span className="font-bold">{sf9Student.last_name}, {sf9Student.first_name}</span></div>
-                              <div>LRN: <span className="font-bold">{sf9Student.lrn}</span></div>
-                              <div>Grade: <span className="font-bold">{sf9Student.grade_level} - {sf9Student.section}</span></div>
-                              <div>Sex: <span className="font-bold">{sf9Student.sex}</span></div>
-                           </div>
-                        </div>
-                        {/* Grades Table */}
-                        <div className="mb-8">
-                           <h3 className="font-bold text-center bg-green-100 py-1 mb-2 border border-green-300">REPORT ON LEARNING PROGRESS AND ACHIEVEMENT</h3>
-                           <table className="w-full text-sm border-collapse border border-slate-400">
-                              <thead>
-                                 <tr className="bg-slate-100"><th className="border border-slate-400 p-2 text-left">Learning Areas</th><th className="border border-slate-400 w-12">Q1</th><th className="border border-slate-400 w-12">Q2</th><th className="border border-slate-400 w-12">Q3</th><th className="border border-slate-400 w-12">Q4</th><th className="border border-slate-400 w-16">Final</th><th className="border border-slate-400 w-24">Remarks</th></tr>
-                              </thead>
-                              <tbody>
-                                 {sf9Grades.map((g, i) => (
-                                    <tr key={g.subject}>
-                                       <td className="border border-slate-400 p-2">{g.subject}</td>
-                                       {[1,2,3,4].map(q => <td key={q} className="border border-slate-400 p-0"><input className="w-full text-center outline-none bg-transparent" value={(g as any)[`quarter_${q}`]} onChange={e => handleSf9GradeChange(i, `quarter_${q}` as any, e.target.value)} /></td>)}
-                                       <td className="border border-slate-400 p-0"><input className="w-full text-center outline-none bg-transparent font-bold" value={g.final_grade||''} onChange={e=>handleSf9GradeChange(i,'final_grade',e.target.value)} /></td>
-                                       <td className="border border-slate-400 p-0"><input className="w-full text-center outline-none bg-transparent text-xs" value={g.remarks||''} onChange={e=>handleSf9GradeChange(i,'remarks',e.target.value)} /></td>
-                                    </tr>
-                                 ))}
-                              </tbody>
-                           </table>
-                        </div>
-                        {/* Values Table */}
-                        <div className="mb-8 page-break-inside-avoid">
-                           <h3 className="font-bold text-center bg-green-100 py-1 mb-2 border border-green-300">REPORT ON LEARNER'S OBSERVED VALUES</h3>
-                           <table className="w-full text-sm border-collapse border border-slate-400">
-                              <thead>
-                                 <tr className="bg-slate-100"><th className="border border-slate-400 p-2 text-left w-32">Core Values</th><th className="border border-slate-400 p-2 text-left">Behavior Statements</th><th className="border border-slate-400 w-12">Q1</th><th className="border border-slate-400 w-12">Q2</th><th className="border border-slate-400 w-12">Q3</th><th className="border border-slate-400 w-12">Q4</th></tr>
-                              </thead>
-                              <tbody>
-                                 {sf9Values.map((v, i) => (
-                                    <tr key={i}>
-                                       {(i === 0 || sf9Values[i-1].core_value !== v.core_value) && (
-                                         <td rowSpan={sf9Values.filter(val => val.core_value === v.core_value).length} className="border border-slate-400 p-2 align-top font-bold bg-slate-50">{v.core_value}</td>
-                                       )}
-                                       <td className="border border-slate-400 p-2">{v.behavior_statement}</td>
-                                       {['q1','q2','q3','q4'].map(q => <td key={q} className="border border-slate-400 p-0"><input className="w-full text-center outline-none bg-transparent" value={(v as any)[q]} onChange={e => handleSf9ValueChange(i, q, e.target.value)} /></td>)}
-                                    </tr>
-                                 ))}
-                              </tbody>
-                           </table>
-                           <p className="text-xs mt-2 italic text-slate-500">Marking: AO (Always Observed), SO (Sometimes Observed), RO (Rarely Observed), NO (Not Observed)</p>
-                        </div>
-                        {/* Attendance Table */}
-                        <div className="mb-8 page-break-inside-avoid">
-                           <h3 className="font-bold text-center bg-green-100 py-1 mb-2 border border-green-300">ATTENDANCE RECORD</h3>
-                           <table className="w-full text-sm border-collapse border border-slate-400 text-center">
-                              <thead>
-                                 <tr className="bg-slate-100">
-                                   <th className="border border-slate-400 p-1">Month</th>
-                                   {[...Array(12)].map((_,i) => <th key={i} className="border border-slate-400 p-1 w-8">{i+1}</th>)}
-                                   <th className="border border-slate-400 p-1">Total</th>
-                                 </tr>
-                              </thead>
-                              <tbody>
-                                 <tr>
-                                    <td className="border border-slate-400 p-1 font-bold text-left pl-2">Days Present</td>
-                                    {[...Array(12)].map((_,i) => <td key={i} className="border border-slate-400 p-1">{sf9Attendance[String(i+1).padStart(2,'0')]?.present || 0}</td>)}
-                                    <td className="border border-slate-400 p-1 font-bold">{Object.values(sf9Attendance).reduce((acc, curr: any) => acc + curr.present, 0)}</td>
-                                 </tr>
-                                 <tr>
-                                    <td className="border border-slate-400 p-1 font-bold text-left pl-2">Days Absent</td>
-                                    {[...Array(12)].map((_,i) => <td key={i} className="border border-slate-400 p-1">{sf9Attendance[String(i+1).padStart(2,'0')]?.absent || 0}</td>)}
-                                    <td className="border border-slate-400 p-1 font-bold">{Object.values(sf9Attendance).reduce((acc, curr: any) => acc + curr.absent, 0)}</td>
-                                 </tr>
-                              </tbody>
-                           </table>
-                        </div>
-                     </div>
-                  )}
-               </div>
-            )}
             
             {/* ADMIN VIEW */}
             {activeView === 'admin_sections' && (
@@ -2004,6 +2001,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                     >
                        Manage Users
                     </button>
+                    {/* Only Show Settings to Admin, NOT Head Teacher */}
+                    {isAdmin && (
+                      <button 
+                         className={`pb-2 px-1 text-sm font-medium transition-colors ${adminTab==='settings' ? 'border-b-2 border-purple-600 text-purple-700' : 'text-slate-500 hover:text-purple-600'}`}
+                         onClick={() => setAdminTab('settings')}
+                      >
+                         System Settings
+                      </button>
+                    )}
                  </div>
                  
                  {/* Manage Sections Tab */}
@@ -2281,32 +2287,94 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ session }) =
                        </div>
                     </div>
                  )}
+                 
+                 {/* System Settings Tab - Only visible to Admin */}
+                 {isAdmin && adminTab === 'settings' && (
+                    <div className="max-w-2xl">
+                       <h2 className="text-lg font-bold text-purple-900 mb-6">System Configuration</h2>
+                       
+                       <div className="bg-white border border-slate-200 rounded-lg p-6">
+                          <div className="flex items-center justify-between mb-4">
+                             <div>
+                                <h3 className="font-bold text-slate-800">Registration Visibility</h3>
+                                <p className="text-sm text-slate-500">Control which roles are visible in the public registration form.</p>
+                             </div>
+                             <button 
+                                onClick={() => handleToggleAdminRegistration(!allowAdminRegistration)}
+                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-purple-600 focus:ring-offset-2 ${allowAdminRegistration ? 'bg-purple-600' : 'bg-slate-200'}`}
+                             >
+                                <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${allowAdminRegistration ? 'translate-x-5' : 'translate-x-0'}`} />
+                             </button>
+                          </div>
+                          <div className="bg-slate-50 p-4 rounded text-sm text-slate-700">
+                             <strong>Current Status: </strong>
+                             {allowAdminRegistration ? (
+                                <span className="text-green-600 font-bold">Visible.</span>
+                             ) : (
+                                <span className="text-red-600 font-bold">Hidden.</span>
+                             )}
+                             <span className="ml-2">
+                                Users can select "Head Teacher" or "Admin" during signup. {allowAdminRegistration ? "" : "Only 'Teacher' role is available."}
+                             </span>
+                          </div>
+                       </div>
+                    </div>
+                 )}
                </div>
             )}
             
-            {/* Class Record View (omitted for brevity) */}
+            {/* Class Record View (Updated with Combined Selector) */}
             {activeView === 'class_record' && (
               <div className="space-y-6">
-                {/* ... existing class record ... */}
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 print:hidden">
                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-4">
-                     <Select 
-                        label="Section" 
-                        options={mySections.map(s => `${s.grade_level} - ${s.section_name}`)}
-                        value={crSelection.section ? `${crSelection.grade} - ${crSelection.section}` : ''}
-                        onChange={e => {
-                           const [g, s] = e.target.value.split(' - ');
-                           setCrSelection({...crSelection, grade: g, section: s});
-                        }} 
-                        placeholder="Select Assigned Section"
-                     />
-                     <Select 
-                        label="Subject" 
-                        options={availableSubjects} 
-                        value={crSelection.subject} 
-                        onChange={e => setCrSelection({...crSelection, subject: e.target.value})} 
-                        placeholder={availableSubjects.length > 0 ? "Select Subject" : "No Assigned Subjects"}
-                     />
+                     {/* Combined Class Selector */}
+                     <div className="sm:col-span-2">
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Select Class (Section & Subject)</label>
+                        <select 
+                           className="block w-full rounded-lg border border-slate-300 shadow-sm text-slate-900 sm:text-sm px-3 py-2.5 bg-white focus:ring-2 focus:ring-green-600 focus:border-green-600"
+                           value={
+                              crSelection.section 
+                              ? `${crSelection.grade} - ${crSelection.section} - ${crSelection.subject}` 
+                              : ''
+                           }
+                           onChange={(e) => {
+                              const val = e.target.value;
+                              if (!val) return;
+                              // Value format matches uniqueId constructed in fetchMyClasses
+                              const selectedClass = myClasses.find(c => 
+                                 `${c.grade_level} - ${c.section_name} - ${c.subject}` === val
+                              );
+                              
+                              if (selectedClass) {
+                                 setCrSelection({
+                                    grade: selectedClass.grade_level, 
+                                    section: selectedClass.section_name, 
+                                    subject: selectedClass.subject,
+                                    quarter: crSelection.quarter
+                                 });
+                              }
+                           }}
+                        >
+                           <option value="">-- Select Class --</option>
+                           {myClasses.map(c => (
+                              <option key={c.uniqueId} value={`${c.grade_level} - ${c.section_name} - ${c.subject}`}>
+                                 {c.grade_level} - {c.section_name} ({c.subject})
+                              </option>
+                           ))}
+                        </select>
+                     </div>
+
+                     {/* Read-Only Subject Display */}
+                     <div>
+                        <Input 
+                           label="Subject (Locked)" 
+                           value={crSelection.subject || 'No Class Selected'} 
+                           disabled 
+                           className="bg-slate-100 text-slate-500 cursor-not-allowed"
+                        />
+                     </div>
+
                      <Select label="Quarter" options={['1', '2', '3', '4']} value={String(crSelection.quarter)} onChange={e => setCrSelection({...crSelection, quarter: parseInt(e.target.value)})} />
                    </div>
                    

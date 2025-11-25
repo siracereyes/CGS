@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
@@ -29,6 +29,32 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onNavigateTo
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  
+  // New state to control role visibility based on admin settings
+  const [availableRoles, setAvailableRoles] = useState<string[]>([Role.TEACHER]);
+
+  useEffect(() => {
+     const fetchSettings = async () => {
+        try {
+           const { data } = await supabase
+              .from('system_settings')
+              .select('value')
+              .eq('key', 'registration_config')
+              .maybeSingle();
+              
+           if (data && data.value && data.value.allow_admin_role === true) {
+              setAvailableRoles(Object.values(Role));
+           } else {
+              setAvailableRoles([Role.TEACHER]);
+           }
+        } catch (e) {
+           // If table doesn't exist or error, default to Teacher only for safety
+           console.log("Could not fetch registration settings, defaulting to Teacher role only.");
+           setAvailableRoles([Role.TEACHER]);
+        }
+     };
+     fetchSettings();
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -77,6 +103,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onNavigateTo
       const redirectUrl = window.location.origin;
 
       // 1. Create Auth User
+      // Metadata is passed so the Trigger (if enabled) can create the profile automatically
       const { data, error } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
@@ -99,9 +126,10 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onNavigateTo
       if (error) throw error;
       if (!data.user) throw new Error("Registration failed. No user was created.");
 
-      // 2. Insert into Public Profiles Table immediately
-      // This ensures the user appears in Admin lists even before they log in for the first time.
-      const { error: profileError } = await supabase.from('profiles').insert([{
+      // 2. Insert/Upsert into Public Profiles Table 
+      // We use Upsert here because if the database Trigger runs, the row might already exist.
+      // This ensures we don't crash on Duplicate Key.
+      const { error: profileError } = await supabase.from('profiles').upsert([{
         id: data.user.id,
         first_name: formData.firstName,
         last_name: formData.lastName,
@@ -112,14 +140,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onNavigateTo
         main_grade_level: formData.mainGradeLevel,
         has_multiple_grades: formData.hasMultipleGrades,
         additional_grades: formData.additionalGrades,
-        // Default additional subjects to empty array
         additional_subjects: [] 
-      }]);
+      }], { onConflict: 'id' });
 
       if (profileError) {
-         console.warn("Profile creation warning:", profileError);
-         // We don't throw here, as the auth user was created successfully.
-         // The Dashboard has a self-healing mechanism to fix missing profiles on login.
+         console.warn("Profile creation/update warning (likely handled by trigger):", profileError);
       }
 
       console.log("Registration Successful");
@@ -274,7 +299,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({ onNavigateTo
               name="role" 
               value={formData.role} 
               onChange={handleChange} 
-              options={Object.values(Role)} 
+              options={availableRoles} 
               required 
             />
             <Select 

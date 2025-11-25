@@ -94,7 +94,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onNavigateToRegister }) =>
            throw new Error("Connection failed. Please check your internet or API keys.");
         }
         
-        throw new Error('Invalid password or credentials. Please try again.');
+        if (authError.message.includes("Invalid login credentials") || authError.code === "invalid_credentials") {
+           throw new Error("Invalid password or credentials. Please try again.");
+        }
+        
+        throw new Error('Login failed: ' + authError.message);
       }
 
       if (data.user) {
